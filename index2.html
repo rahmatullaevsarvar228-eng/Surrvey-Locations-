@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Точки опроса / Сўров нуқталари</title>
+<style>
+  :root{
+    --paper:#FBFAF7; --ink:#1E293B; --ink-soft:#5B6472;
+    --line:#E4E1D8; --line-strong:#C9C4B4;
+    --teal:#0F766E; --teal-soft:#E4F3F1;
+    --amber:#B45309; --amber-soft:#FBEEDF;
+    --card:#FFFFFF;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    line-height:1.45;
+  }
+  .wrap{max-width:640px; margin:0 auto; padding:20px 16px 60px;}
+  header{
+    position:sticky; top:0; background:var(--paper); z-index:10;
+    padding:8px 0 14px; margin-bottom:8px; border-bottom:1px solid var(--line);
+  }
+  .top-row{display:flex; justify-content:space-between; align-items:center; gap:12px;}
+  h1{font-size:19px; font-weight:700; margin:0; letter-spacing:-0.01em;}
+  .langs{display:flex; gap:6px; flex-shrink:0;}
+  .langs button{
+    border:1px solid var(--line-strong); background:var(--card); color:var(--ink-soft);
+    padding:7px 13px; border-radius:7px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .langs button.active{background:var(--ink); color:#fff; border-color:var(--ink);}
+  .sub{color:var(--ink-soft); font-size:13px; margin:8px 0 0;}
+
+  .rules{
+    display:flex; gap:10px; margin:14px 0 18px; flex-wrap:wrap;
+  }
+  .rule{
+    flex:1; min-width:140px; background:var(--card); border:1px solid var(--line);
+    border-radius:10px; padding:12px 14px;
+  }
+  .rule .n{font-size:20px; font-weight:700; color:var(--teal);}
+  .rule .l{font-size:11.5px; color:var(--ink-soft); margin-top:2px;}
+
+  .city{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    margin-bottom:10px; overflow:hidden;
+  }
+  .city-head{
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    padding:14px 16px; cursor:pointer;
+  }
+  .city-head .name{font-size:15.5px; font-weight:700;}
+  .city-head .meta{font-size:12px; color:var(--ink-soft); margin-top:2px;}
+  .chevron{
+    width:20px; height:20px; flex-shrink:0; transition:transform .18s;
+    stroke:var(--ink-soft);
+  }
+  .city.open .chevron{transform:rotate(180deg);}
+  .city-body{display:none; padding:0 16px 14px;}
+  .city.open .city-body{display:block;}
+
+  .point{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 12px; background:var(--paper); border:1px solid var(--line);
+    border-radius:9px; margin-bottom:8px;
+  }
+  .point-info{display:flex; align-items:center; gap:10px; min-width:0;}
+  .point-num{
+    width:28px; height:28px; border-radius:50%; background:var(--teal-soft); color:var(--teal);
+    display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:700;
+    flex-shrink:0;
+  }
+  .point-coords{font-size:12px; color:var(--ink-soft); font-variant-numeric:tabular-nums;}
+  .point-district{font-size:11.5px; color:var(--ink-soft);}
+  .point-landmark{font-size:11px; color:var(--teal); margin-top:1px;}
+  .point-link{
+    flex-shrink:0; display:flex; align-items:center; gap:5px; background:var(--ink); color:#fff;
+    padding:8px 12px; border-radius:7px; font-size:12.5px; font-weight:600; text-decoration:none;
+    white-space:nowrap;
+  }
+  .point-link svg{width:14px; height:14px; stroke:#fff;}
+
+  footer{margin-top:24px; font-size:11.5px; color:var(--ink-soft); text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="top-row">
+      <h1 data-t="title">Точки опроса по регионам</h1>
+      <div class="langs">
+        <button id="lang-ru" class="active" onclick="setLang('ru')">RU</button>
+        <button id="lang-uz" onclick="setLang('uz')">ЎЗ</button>
+      </div>
+    </div>
+    <p class="sub" data-t="subtitle">Нажмите на город, чтобы увидеть точки. Кнопка открывает точку в Картах прямо на телефоне.</p>
+  </header>
+
+  <div class="rules">
+    <div class="rule"><div class="n">2 км</div><div class="l" data-t="ruleRadius">радиус одной точки</div></div>
+    <div class="rule"><div class="n">≤ 20</div><div class="l" data-t="ruleMax">анкет на точку максимум</div></div>
+    <div class="rule"><div class="n" id="totalPoints">—</div><div class="l" data-t="ruleTotal">точек всего по всем городам</div></div>
+  </div>
+
+  <div id="cities"></div>
+
+  <footer data-t="footer">Координаты — ориентировочные центры зон для равномерного покрытия города. На месте интервьюер может слегка скорректировать позицию в пределах точки.</footer>
+</div>
+
+<script>
+const PLAN = {"Ташкент": {"total": 292, "n_points": 15, "points": [{"name_ru": "м. Чорсу", "name_uz": "Чорсу метро", "district": "Шайхантахурский р-н", "landmark_ru": "у базара Чорсу", "landmark_uz": "Чорсу бозори ёнида", "search": "Chorsu metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Буюк Ипак Йўли", "name_uz": "Буюк Ипак Йўли метро", "district": "Мирзо-Улугбекский р-н", "landmark_ru": "у Ботанического сада", "landmark_uz": "Ботаника боғи ёнида", "search": "Buyuk Ipak Yoli metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Амир Темур Хиёбони", "name_uz": "Амир Темур Хиёбони метро", "district": "Центр города", "landmark_ru": "у сквера Амира Темура", "landmark_uz": "Амир Темур хиёбони ёнида", "search": "Amir Temur Xiyoboni metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Беруний", "name_uz": "Беруний метро", "district": "Учтепинский р-н", "landmark_ru": "", "landmark_uz": "", "search": "Beruniy metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Тинчлик", "name_uz": "Тинчлик метро", "district": "Шайхантахурский р-н", "landmark_ru": "", "landmark_uz": "", "search": "Tinchlik metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Гафур Гулям", "name_uz": "Ғафур Ғулом метро", "district": "Шайхантахурский р-н", "landmark_ru": "", "landmark_uz": "", "search": "Gafur Gulom metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Алишер Навои", "name_uz": "Алишер Навоий метро", "district": "Центр города", "landmark_ru": "", "landmark_uz": "", "search": "Alisher Navoiy metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Космонавтлар", "name_uz": "Космонавтлар метро", "district": "Мирабадский р-н", "landmark_ru": "", "landmark_uz": "", "search": "Kosmonavtlar metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Тошкент", "name_uz": "Тошкент метро", "district": "Мирабадский р-н", "landmark_ru": "", "landmark_uz": "", "search": "Toshkent metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Мустақиллик Майдони", "name_uz": "Мустақиллик Майдони метро", "district": "Центр города", "landmark_ru": "", "landmark_uz": "", "search": "Mustaqillik Maydoni metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Пахтакор", "name_uz": "Пахтакор метро", "district": "Шайхантахурский р-н", "landmark_ru": "", "landmark_uz": "", "search": "Paxtakor metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Халқлар Дўстлиги", "name_uz": "Халқлар Дўстлиги метро", "district": "Шайхантахурский р-н", "landmark_ru": "у Дворца форумов", "landmark_uz": "Форумлар саройи ёнида", "search": "Xalqlar Dostligi metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Чилонзор", "name_uz": "Чилонзор метро", "district": "Чиланзарский р-н", "landmark_ru": "", "landmark_uz": "", "search": "Chilonzor metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Олмазор", "name_uz": "Олмазор метро", "district": "Чиланзарский р-н", "landmark_ru": "", "landmark_uz": "", "search": "Olmazor metro station, Tashkent, Uzbekistan"}, {"name_ru": "м. Мирзо Улугбек", "name_uz": "Мирзо Улуғбек метро", "district": "Чиланзарский р-н", "landmark_ru": "", "landmark_uz": "", "search": "Mirzo Ulugbek metro station, Tashkent, Uzbekistan"}]}, "Алмалык": {"total": 68, "n_points": 4, "points": [{"lat": 40.846422, "lon": 69.612036, "street_ru": "ул. Амира Темура", "street_uz": "Амир Темур кўчаси"}, {"lat": 40.858196, "lon": 69.581743}, {"lat": 40.824006, "lon": 69.601334}, {"lat": 40.867552, "lon": 69.620148}]}, "Чирчик": {"total": 75, "n_points": 4, "points": [{"lat": 41.470589, "lon": 69.600052, "street_ru": "ул. Амира Темура", "street_uz": "Амир Темур кўчаси"}, {"lat": 41.482363, "lon": 69.569469}, {"lat": 41.448173, "lon": 69.589248}, {"lat": 41.491719, "lon": 69.608242}]}, "Янгиюль": {"total": 53, "n_points": 3, "points": [{"lat": 41.11372, "lon": 69.065857, "street_ru": "ул. Шарофа Рашидова", "street_uz": "Шароф Рашидов кўчаси"}, {"lat": 41.125494, "lon": 69.035441}, {"lat": 41.091304, "lon": 69.055111}]}, "Фергана": {"total": 165, "n_points": 9, "points": [{"lat": 40.389013, "lon": 71.797137, "street_ru": "ул. Мустакиллик", "street_uz": "Мустақиллик кўчаси"}, {"lat": 40.400787, "lon": 71.767051, "street_ru": "ул. Юксалиш", "street_uz": "Юксалиш кўчаси"}, {"lat": 40.366597, "lon": 71.786508, "street_ru": "Худжандская ул.", "street_uz": "Хўжанд кўчаси"}, {"lat": 40.410143, "lon": 71.805194, "street_ru": "ул. Широтная", "street_uz": "Широтная кўчаси"}, {"lat": 40.383754, "lon": 71.744894, "street_ru": "ул. Пахлавона Махмуда", "street_uz": "Паҳлавон Маҳмуд кўчаси"}, {"lat": 40.371099, "lon": 71.820899, "street_ru": "ул. Шарк (Фрунзе)", "street_uz": "Шарқ кўчаси"}, {"lat": 40.424053, "lon": 71.771558, "street_ru": "ул. Навои", "street_uz": "Навоий кўчаси"}, {"lat": 40.354424, "lon": 71.76034}, {"lat": 40.403247, "lon": 71.835096}]}, "Андижан": {"total": 165, "n_points": 9, "points": [{"lat": 40.783176, "lon": 72.363564, "street_ru": "Центральный дехканский базар / ул. Амира Темура", "street_uz": "Марказий деҳқон бозори / Амир Темур кўчаси"}, {"lat": 40.79495, "lon": 72.333299, "street_ru": "Рынок «Жахон бозори»", "street_uz": "Жаҳон бозори"}, {"lat": 40.76076, "lon": 72.352871}, {"lat": 40.804306, "lon": 72.371668}, {"lat": 40.777917, "lon": 72.311011}, {"lat": 40.765262, "lon": 72.387465}, {"lat": 40.818216, "lon": 72.337833}, {"lat": 40.748587, "lon": 72.326548}, {"lat": 40.79741, "lon": 72.401746}]}, "Наманган": {"total": 158, "n_points": 8, "points": [{"lat": 41.003098, "lon": 71.686408, "street_ru": "ул. Навои", "street_uz": "Навоий кўчаси"}, {"lat": 41.014872, "lon": 71.656042, "street_ru": "ул. Туракурган", "street_uz": "Туракўрғон кўчаси"}, {"lat": 40.980682, "lon": 71.67568, "street_ru": "ул. Амира Темура", "street_uz": "Амир Темур кўчаси"}, {"lat": 41.024228, "lon": 71.694539}, {"lat": 40.997839, "lon": 71.63368}, {"lat": 40.985184, "lon": 71.710389}, {"lat": 41.038138, "lon": 71.660591}, {"lat": 40.968509, "lon": 71.649269}]}, "Самарканд": {"total": 105, "n_points": 6, "points": [{"lat": 39.654361, "lon": 66.982021, "street_ru": "Сиабский базар / ул. Ислама Каримова", "street_uz": "Сиёб бозори / Ислом Каримов кўчаси"}, {"lat": 39.666135, "lon": 66.952256, "street_ru": "ул. Мирзо Улугбека", "street_uz": "Мирзо Улуғбек кўчаси"}, {"lat": 39.631945, "lon": 66.971505}, {"lat": 39.675491, "lon": 66.989991}, {"lat": 39.649102, "lon": 66.930337}, {"lat": 39.636447, "lon": 67.005528}]}, "Бухара": {"total": 105, "n_points": 6, "points": [{"lat": 39.775065, "lon": 64.444386, "street_ru": "Ляби-Хауз / просп. Бахауддина Накшбанди", "street_uz": "Лаби ҳовуз / Баҳоуддин Нақшбанд шоҳкўчаси"}, {"lat": 39.786839, "lon": 64.414569, "street_ru": "ул. Мухаммад-Икбол", "street_uz": "Муҳаммад-Иқбол кўчаси"}, {"lat": 39.752649, "lon": 64.433852}, {"lat": 39.796195, "lon": 64.45237}, {"lat": 39.769806, "lon": 64.392611}, {"lat": 39.757151, "lon": 64.467934}]}, "Навои": {"total": 98, "n_points": 5, "points": [{"lat": 40.090144, "lon": 65.391721, "street_ru": "проспект Галаба", "street_uz": "Ғалаба шоҳкўчаси"}, {"lat": 40.101918, "lon": 65.361767}, {"lat": 40.067728, "lon": 65.381139}, {"lat": 40.111274, "lon": 65.399742}, {"lat": 40.084885, "lon": 65.339708}]}, "Карши": {"total": 90, "n_points": 5, "points": [{"lat": 38.862263, "lon": 65.802375, "street_ru": "ул. Мустакиллик", "street_uz": "Мустақиллик кўчаси"}, {"lat": 38.874037, "lon": 65.772945}, {"lat": 38.839847, "lon": 65.791978}, {"lat": 38.883393, "lon": 65.810256}, {"lat": 38.857004, "lon": 65.751271}]}, "Термез": {"total": 90, "n_points": 5, "points": [{"lat": 37.225867, "lon": 67.291371, "street_ru": "ул. Мустакиллик", "street_uz": "Мустақиллик кўчаси"}, {"lat": 37.237641, "lon": 67.262592, "street_ru": "ул. Ф. Ходжаева", "street_uz": "Ф. Хўжаев кўчаси"}, {"lat": 37.203451, "lon": 67.281204, "street_ru": "ул. Гагарина", "street_uz": "Гагарин кўчаси"}, {"lat": 37.246997, "lon": 67.299078}, {"lat": 37.220608, "lon": 67.241397}]}, "Нукус": {"total": 172, "n_points": 9, "points": [{"lat": 42.463411, "lon": 59.623899, "street_ru": "проспект Дослык / главная площадь", "street_uz": "Дўстлик шоҳкўчаси / бош майдон"}, {"lat": 42.475185, "lon": 59.592836}, {"lat": 42.440995, "lon": 59.612925}, {"lat": 42.484541, "lon": 59.632218}, {"lat": 42.458152, "lon": 59.569959}, {"lat": 42.445497, "lon": 59.648432}, {"lat": 42.498451, "lon": 59.597489}, {"lat": 42.428822, "lon": 59.585907}, {"lat": 42.477645, "lon": 59.66309}]}, "Ургенч": {"total": 164, "n_points": 9, "points": [{"lat": 41.556574, "lon": 60.645379, "street_ru": "ул. Ал-Хорезми", "street_uz": "Ал-Хоразмий кўчаси"}, {"lat": 41.568348, "lon": 60.614755}, {"lat": 41.534158, "lon": 60.63456}, {"lat": 41.577704, "lon": 60.65358}, {"lat": 41.551315, "lon": 60.592203}, {"lat": 41.53866, "lon": 60.669565}, {"lat": 41.591614, "lon": 60.619343}, {"lat": 41.521985, "lon": 60.607925}, {"lat": 41.570808, "lon": 60.684015}]}};
+
+const T = {
+  ru: {
+    title: "Точки опроса по регионам",
+    subtitle: "Нажмите на город, чтобы увидеть точки. Кнопка открывает точку в Картах прямо на телефоне.",
+    ruleRadius: "радиус одной точки", ruleMax: "анкет на точку максимум", ruleTotal: "точек всего по всем городам",
+    footer: "Ташкент — реальные станции метро с районом и ориентиром (перепроверено по официальным данным). Остальные 13 городов — расчётные точки для равномерного покрытия центра города; координаты ориентировочные, интервьюер может скорректировать позицию на месте, оставаясь на улице.",
+    pointsWord: "точек", quotaWord: "анкет по плану", openMap: "Карта", point: "Точка",
+  },
+  uz: {
+    title: "Ҳудудлар бўйича сўров нуқталари",
+    subtitle: "Шаҳарни босинг — нуқталар кўринади. Тугма нуқтани телефонда тўғридан-тўғри Хариталарда очади.",
+    ruleRadius: "бир нуқта радиуси", ruleMax: "нуқтада максимал анкета", ruleTotal: "барча шаҳарлар бўйича жами нуқта",
+    footer: "Тошкент — расмий маълумотлар бўйича текширилган ҳақиқий метро станциялари, туман ва мўлжал билан. Қолган 13 шаҳар — шаҳар марказини бир текис қамраб олиш учун ҳисобланган тахминий нуқталар; жойда интервьюер позицияни кўчада қолган ҳолда бироз тўғрилаши мумкин.",
+    pointsWord: "нуқта", quotaWord: "режа бўйича анкета", openMap: "Харита", point: "Нуқта",
+  }
+};
+let currentLang = "ru";
+
+function setLang(lang){
+  currentLang = lang;
+  document.getElementById("lang-ru").classList.toggle("active", lang === "ru");
+  document.getElementById("lang-uz").classList.toggle("active", lang === "uz");
+  document.querySelectorAll("[data-t]").forEach(el => {
+    const key = el.getAttribute("data-t");
+    if (T[lang][key]) el.textContent = T[lang][key];
+  });
+  renderCities();
+}
+
+function renderCities(){
+  const t = T[currentLang];
+  const container = document.getElementById("cities");
+  const openState = {};
+  container.querySelectorAll(".city").forEach(el => openState[el.dataset.city] = el.classList.contains("open"));
+
+  let totalPoints = 0;
+  let html = "";
+  Object.keys(PLAN).forEach(city => {
+    const c = PLAN[city];
+    totalPoints += c.n_points;
+    const isOpen = openState[city] || false;
+    html += `<div class="city ${isOpen ? "open" : ""}" data-city="${city}">
+      <div class="city-head" onclick="toggleCity('${city}')">
+        <div>
+          <div class="name">${city}</div>
+          <div class="meta">${c.n_points} ${t.pointsWord} · ${c.total} ${t.quotaWord}</div>
+        </div>
+        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="city-body">`;
+    c.points.forEach((p, i) => {
+      const isNamed = !!p.search;      // Ташкент — реальные станции метро, без координат
+      const hasStreet = !!p.street_ru; // координата + подпись реальной улицы рядом
+      let mapUrl, infoHtml;
+      if (isNamed){
+        mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.search)}`;
+        const name = currentLang === "uz" ? p.name_uz : p.name_ru;
+        const landmark = currentLang === "uz" ? p.landmark_uz : p.landmark_ru;
+        infoHtml = `<div style="font-weight:600; font-size:12.5px;">${name}</div>
+          <div class="point-district">${p.district}</div>
+          ${landmark ? `<div class="point-landmark">${landmark}</div>` : ""}`;
+      } else {
+        // Карта всегда строится ПО КООРДИНАТАМ — это гарантирует расстановку
+        // точек (не даёт им "склеиться" в одном месте), а название улицы —
+        // просто подпись рядом, справочно.
+        mapUrl = `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lon}`;
+        if (hasStreet){
+          const street = currentLang === "uz" ? p.street_uz : p.street_ru;
+          infoHtml = `<div style="font-weight:600; font-size:12.5px;">${street}</div>
+            <div class="point-coords">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div>`;
+        } else {
+          infoHtml = `<div class="point-coords">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div>`;
+        }
+      }
+      html += `<div class="point">
+        <div class="point-info">
+          <div class="point-num">${i + 1}</div>
+          <div>${infoHtml}</div>
+        </div>
+        <a class="point-link" href="${mapUrl}" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          ${t.openMap}
+        </a>
+      </div>`;
+    });
+    html += `</div></div>`;
+  });
+  container.innerHTML = html;
+  document.getElementById("totalPoints").textContent = totalPoints;
+}
+
+function toggleCity(city){
+  const el = document.querySelector(`.city[data-city="${city}"]`);
+  el.classList.toggle("open");
+}
+
+renderCities();
+</script>
+</body>
+</html>
