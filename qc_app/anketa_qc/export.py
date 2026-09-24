@@ -125,6 +125,16 @@ def full_report(result, legend):
     return _to_bytes(build)
 
 
+def clean_report(clean, todo):
+    """Чистая база для заказчика: только принятые и анкеты без замечаний, все
+    исходные колонки. Нерешённые подозрительные — отдельным листом."""
+    def build(writer):
+        write_sheet(writer, "Чистая база", clean)
+        if len(todo):
+            write_sheet(writer, "Не решено", todo, row_status=["YELLOW"] * len(todo))
+    return _to_bytes(build)
+
+
 def simple_report(sheet, rows, status_col=None):
     df = pd.DataFrame(rows)
     return _to_bytes(lambda w: write_sheet(w, sheet, df, status_col=status_col))

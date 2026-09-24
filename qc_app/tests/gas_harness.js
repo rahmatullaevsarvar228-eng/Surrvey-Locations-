@@ -12,7 +12,7 @@ const unsigned = (arr) => Buffer.from(arr.map((b) => (b + 256) % 256));
 
 class Sheet {
   constructor(name, rows) { this.name = name; this.rows = rows || []; }
-  appendRow(r) { this.rows.push(r.slice()); }
+  appendRow(r) { if (this.readonly) throw new Error("нет прав на запись"); this.rows.push(r.slice()); }
   setFrozenRows() {}
   getLastRow() { return this.rows.length; }
   deleteRow(i) { this.rows.splice(i - 1, 1); }
@@ -21,8 +21,10 @@ class Sheet {
     return { getValues: () => this.rows.map((r) => Array.from({ length: w }, (_, j) => (r[j] === undefined ? "" : r[j]))) };
   }
   getRange(row, col, nr, nc) {
+    if (this.readonly) throw new Error("нет прав на запись");
     return {
       setValue: (v) => { while (this.rows.length < row) this.rows.push([]); this.rows[row - 1][col - 1] = v; },
+      setValues: (vals) => { while (this.rows.length < row) this.rows.push([]); vals[0].forEach((v, j) => { this.rows[row - 1][col - 1 + j] = v; }); },
       getValues: () => this.rows.slice(row - 1, row - 1 + (nr || 1)).map((r) => r.slice(col - 1, col - 1 + (nc || 1))),
     };
   }
@@ -30,7 +32,7 @@ class Sheet {
 class Book {
   constructor(sheets) { this.sheets = sheets || []; }
   getSheetByName(n) { return this.sheets.find((s) => s.name === n) || null; }
-  insertSheet(n) { const s = new Sheet(n); this.sheets.push(s); return s; }
+  insertSheet(n) { if (this.readonly) throw new Error("нет прав на запись"); const s = new Sheet(n); this.sheets.push(s); return s; }
   getSheets() { return this.sheets; }
   getSpreadsheetTimeZone() { return "Asia/Tashkent"; }
 }
@@ -201,5 +203,34 @@ const newPass = r.logs.join("\n").match(/Новый пароль админис�
 assert.notStrictEqual(oldPass, newPass);
 assert.match(r.call({ action: "login", login: "admin", password: oldPass }).error, /Неверный/);
 assert.ok(r.call({ action: "login", login: "admin", password: newPass }).token);
+
+// решения ОТК: только руководитель, запись в лист «Решения ОТК» таблицы источника
+{
+  const e = makeEnv();
+  e.ctx.setup();
+  const pw = e.logs.join("\n").match(/Пароль: (\S+)/)[1];
+  const A = e.call({ action: "login", login: "admin", password: pw }).token;
+  e.external["DDD"] = new Book([new Sheet("data", [["_id", "x"], [1, "a"], [2, "b"]])]);
+  const lead = e.call({ action: "create_user", token: A, login: "boss", team: "T", role: "lead" });
+  const usr = e.call({ action: "create_user", token: A, login: "sup", team: "T" });
+  const L = e.call({ action: "login", login: "boss", password: lead.password }).token;
+  const U = e.call({ action: "login", login: "sup", password: usr.password }).token;
+  const src = e.call({ action: "add_source", token: L, name: "Поток", url: "https://docs.google.com/spreadsheets/d/DDD/edit" }).source;
+  assert.match(e.call({ action: "set_decisions", token: U, source_id: src.id, items: [{ id: "1", decision: "Брак" }] }).error, /руководитель/);
+  assert.match(e.call({ action: "set_decisions", token: L, source_id: src.id, items: [{ id: "1", decision: "Плохо" }] }).error, /Неизвестное/);
+  // нет прав редактора — понятная подсказка
+  e.external["DDD"].readonly = true;
+  assert.match(e.call({ action: "set_decisions", token: L, source_id: src.id, items: [{ id: "1", decision: "Брак" }] }).error, /Редактор/);
+  e.external["DDD"].readonly = false;
+  let r = e.call({ action: "set_decisions", token: L, source_id: src.id, items: [
+    { id: "1", decision: "Брак", reason: "длилась 3 мин", comment: "не дозвонились" }, { id: "2", decision: "На перезвон" }] });
+  assert.strictEqual(r.decisions.length, 2);
+  r = e.call({ action: "set_decisions", token: L, source_id: src.id, items: [{ id: "2", decision: "Принять" }, { id: "1", decision: "" }] });
+  assert.deepStrictEqual(r.decisions.map((d) => [d.id, d.decision, d.by]), [["2", "Принять", "boss"]]);
+  const f = e.call({ action: "fetch", token: U, source_id: src.id });
+  assert.strictEqual(f.rows.length, 2, "лист решений не смешивается с анкетами");
+  assert.deepStrictEqual(f.decisions.map((d) => d.decision), ["Принять"]);
+  assert.strictEqual(e.external["DDD"].getSheets()[0].name, "data");
+}
 
 console.log("gas_harness: OK");

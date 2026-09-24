@@ -24,8 +24,10 @@ def demo_bytes(tmp_path_factory):
 
 class FakeClient:
     """Сервер доступа в памяти — тот же протокол, что у server/Code.gs."""
-    users = {"admin": ("pass-admin", "admin", True), "ali": ("pass-ali", "user", True)}
+    users = {"admin": ("pass-admin", "admin", True), "ali": ("pass-ali", "user", True),
+             "boss": ("pass-boss", "lead", True)}
     frames = {}
+    saved = {}   # «лист Решения ОТК»: {source_id: {id: решение}}
 
     def __init__(self, url):
         if not url.startswith("https://"):
@@ -58,13 +60,23 @@ class FakeClient:
         if action == "delete_source":
             self.frames.pop(params["id"], None)
             return {"ok": True}
+        if action == "set_decisions":
+            if self.users[self.user][1] not in ("lead", "admin"):
+                raise RemoteError("Решения по анкетам ставит только руководитель проекта")
+            sheet = self.saved.setdefault(params["source_id"], {})
+            for it in params["items"]:
+                if it["decision"]:
+                    sheet[it["id"]] = dict(it, by=self.user)
+                else:
+                    sheet.pop(it["id"], None)
+            return {"decisions": list(sheet.values())}
         if action == "create_user":
             return {"login": params["login"], "password": "Abc123xyz9"}
         return {"ok": True}
 
     def fetch_frame(self, source_id):
         self._check()
-        return source_id, self.frames[source_id]
+        return source_id, source_id, self.frames[source_id], list(self.saved.get(source_id, {}).values())
 
 
 def login(client, who="admin"):
@@ -307,3 +319,65 @@ def test_gps_through_api(tmp_path, demo_bytes):
     plan = client.post("/api/geo/plan/parse", data={"file": (io.BytesIO(buf.getvalue()), "plan.xlsx")},
                        content_type="multipart/form-data").get_json()
     assert plan["Бухара"]["points"][0]["lat"] == 39.77
+
+
+
+def test_decisions_detail_and_clean_base(tmp_path, demo_bytes):
+    data = pd.read_excel(io.BytesIO(demo_bytes), sheet_name="data")
+    half = len(data) // 2
+    FakeClient.frames = {"Т1": data.iloc[:half], "Т2": data.iloc[half:]}
+    FakeClient.saved = {}
+    app = create_app(tmp_path, client_factory=FakeClient)
+    client = app.test_client()
+    login(client, "boss")
+    client.post("/api/source/remote", json={"ids": ["Т1", "Т2"]})
+    r = client.post("/api/run", json={}).get_json()
+    rv = r["summary"]["review"]
+    assert rv["enabled"] and rv["can_decide"] and rv["todo"] > 0
+    bad = [a for a in r["anketas"] if a["defect"]]
+    first, last = bad[0], bad[-1]
+    assert first["pos"] != last["pos"]
+
+    # объяснение + исходная строка с выделенными колонками
+    d = client.get(f"/api/anketa/{first['pos']}").get_json()
+    assert d["issues"] and all(i["logic"] for i in d["issues"])
+    cols = [v["column"] for v in d["values"]]
+    assert "Источник" in cols and "_id" in cols
+    assert any(v["highlight"] for v in d["values"])
+    short = next((a for a in bad if "длилось" in a["reasons"]), None)
+    if short:
+        ds = client.get(f"/api/anketa/{short['pos']}").get_json()
+        hl = {v["column"] for v in ds["values"] if v["highlight"]}
+        assert {"start", "end"} <= hl
+
+    # решения — пачкой, по двум разным таблицам-источникам
+    r = client.post("/api/decisions", json={"positions": [first["pos"], last["pos"]],
+                                            "decision": "Брак", "comment": "не дозвонились"}).get_json()
+    assert r["summary"]["review"]["Брак"] == 2
+    assert set(FakeClient.saved) == {"Т1", "Т2"}
+    got = next(a for a in r["anketas"] if a["pos"] == first["pos"])
+    assert got["decision"] == "Брак" and got["decision_comment"] == "не дозвонились"
+    r = client.post("/api/decisions", json={"positions": [last["pos"]], "decision": "Принять"}).get_json()
+    assert r["summary"]["review"]["Принять"] == 1 and r["summary"]["review"]["Брак"] == 1
+
+    # решения переживают перезагрузку данных (читаются из «листа»)
+    client.post("/api/source/remote", json={"ids": ["Т1", "Т2"]})
+    r = client.post("/api/run", json={}).get_json()
+    assert r["summary"]["review"]["Брак"] == 1
+
+    # чистая база: без брака, принятая подозрительная — внутри, нерешённые — отдельно
+    wb = openpyxl.load_workbook(io.BytesIO(client.get("/api/export/clean").data))
+    assert {"Чистая база", "Не решено"} <= set(wb.sheetnames)
+    ws = wb["Чистая база"]
+    head = [c.value for c in ws[1]]
+    ids = {str(row[head.index("_id")]) for row in ws.iter_rows(min_row=2, values_only=True)}
+    assert str(first["id"]) not in ids and str(last["id"]) in ids
+    assert len(ids) < len(data)
+
+    # обычный сотрудник решения ставить не может
+    c2 = create_app(tmp_path / "u", client_factory=FakeClient).test_client()
+    login(c2, "ali")
+    c2.post("/api/source/remote", json={"ids": ["Т1"]})
+    r2 = c2.post("/api/run", json={}).get_json()
+    assert r2["summary"]["review"]["can_decide"] is False
+    assert c2.post("/api/decisions", json={"positions": [0], "decision": "Брак"}).status_code == 403

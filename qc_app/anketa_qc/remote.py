@@ -62,8 +62,10 @@ class RemoteClient:
         return data
 
     def fetch_frame(self, source_id):
+        """(id, название, таблица анкет, решения ОТК из листа «Решения ОТК»)."""
         data = self.call("fetch", source_id=source_id)
-        return data["name"], rows_to_frame(data.get("columns") or [], data.get("rows") or [])
+        return (data.get("id", source_id), data["name"],
+                rows_to_frame(data.get("columns") or [], data.get("rows") or []), data.get("decisions") or [])
 
 
 def rows_to_frame(columns, rows):

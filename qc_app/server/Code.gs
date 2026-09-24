@@ -19,6 +19,9 @@ var SHEET_LOG = 'Журнал';
 var USERS_HEADER = ['login', 'name', 'team', 'role', 'active', 'salt', 'hash', 'created', 'last_login'];
 var SOURCES_HEADER = ['id', 'team', 'project', 'name', 'url', 'sheet', 'added_by', 'created'];
 var LOG_HEADER = ['time', 'login', 'action', 'detail'];
+var DECISIONS_SHEET = 'Решения ОТК';
+var DECISIONS_HEADER = ['ID анкеты', 'Решение', 'Причина (система)', 'Комментарий', 'Кто решил', 'Когда'];
+var DECISION_VALUES = ['Брак', 'Принять', 'На перезвон'];
 var TOKEN_HOURS = 12;
 var HASH_ROUNDS = 500;
 var MAX_FAILS = 8;          // неудачных входов подряд до паузы
@@ -59,6 +62,7 @@ function handle_(req) {
     case 'add_source': return withLock_(function () { return addSource_(me, req); });
     case 'delete_source': return withLock_(function () { return deleteSource_(me, req.id); });
     case 'fetch': return fetchSource_(me, req.source_id);
+    case 'set_decisions': return withLock_(function () { return setDecisions_(me, req); });
     case 'change_password': return changePassword_(me, req.old_password, req.new_password);
   }
   if (me.role !== 'admin') throw new Error('Нужны права администратора');
@@ -173,7 +177,7 @@ function createUser_(me, req) {
   var team = String(req.team || '').trim();
   if (req.role !== 'admin' && !team) throw new Error('Укажите команду сотрудника');
   writeRow_(SHEET_USERS, USERS_HEADER, {
-    login: login, name: String(req.name || ''), team: team, role: req.role === 'admin' ? 'admin' : 'user',
+    login: login, name: String(req.name || ''), team: team, role: normRole_(req.role),
     active: 'да', salt: salt, hash: hashPassword_(password, salt), created: now_(), last_login: '',
   });
   log_(me.login, 'create_user', login);
@@ -183,11 +187,11 @@ function createUser_(me, req) {
 function updateUser_(me, req) {
   var user = findUser_(req.login);
   if (!user) throw new Error('Пользователь не найден');
-  if (user.login === me.login && (req.active === false || req.role === 'user')) {
+  if (user.login === me.login && (req.active === false || (req.role !== undefined && req.role !== 'admin'))) {
     throw new Error('Нельзя заблокировать себя или снять с себя права администратора');
   }
   if (req.name !== undefined) setCell_(SHEET_USERS, USERS_HEADER, user._row, 'name', String(req.name));
-  if (req.role !== undefined) setCell_(SHEET_USERS, USERS_HEADER, user._row, 'role', req.role === 'admin' ? 'admin' : 'user');
+  if (req.role !== undefined) setCell_(SHEET_USERS, USERS_HEADER, user._row, 'role', normRole_(req.role));
   if (req.active !== undefined) setCell_(SHEET_USERS, USERS_HEADER, user._row, 'active', req.active ? 'да' : 'нет');
   if (req.team !== undefined) setCell_(SHEET_USERS, USERS_HEADER, user._row, 'team', String(req.team).trim());
   log_(me.login, 'update_user', user.login);
@@ -324,7 +328,84 @@ function fetchSource_(me, sourceId) {
   }
   while (values.length > 1 && values[values.length - 1].join('') === '') values.pop();
   log_(me.login, 'fetch', src.name + ' (' + Math.max(values.length - 1, 0) + ' строк)');
-  return { id: String(src.id), name: String(src.name), columns: values[0] || [], rows: values.slice(1) };
+  return { id: String(src.id), name: String(src.name), columns: values[0] || [], rows: values.slice(1),
+           decisions: readDecisions_(ss, tz) };
+}
+
+// ── Решения ОТК (пишутся в ту же Google-таблицу, на отдельный лист) ────────
+function normRole_(role) {
+  return role === 'admin' ? 'admin' : role === 'lead' ? 'lead' : 'user';
+}
+
+function readDecisions_(ss, tz) {
+  var sh = ss.getSheetByName(DECISIONS_SHEET);
+  if (!sh) return [];
+  var values = sh.getDataRange().getValues();
+  var out = [];
+  for (var r = 1; r < values.length; r++) {
+    var id = String(values[r][0]).trim();
+    if (!id) continue;
+    var at = values[r][5];
+    if (Object.prototype.toString.call(at) === '[object Date]') at = Utilities.formatDate(at, tz, 'yyyy-MM-dd HH:mm');
+    out.push({ id: id, decision: String(values[r][1]), reason: String(values[r][2]), comment: String(values[r][3]),
+               by: String(values[r][4]), at: String(at) });
+  }
+  return out;
+}
+
+/** Решения ставит только руководитель проекта (или администратор). Одна
+ *  строка на анкету: повторное решение перезаписывает прежнее, пустое —
+ *  удаляет. Нужны права «Редактор» у аккаунта сервера на эту таблицу. */
+function setDecisions_(me, req) {
+  if (me.role !== 'lead' && me.role !== 'admin') throw new Error('Решения по анкетам ставит только руководитель проекта');
+  var src = null;
+  var all = readRows_(SHEET_SOURCES, SOURCES_HEADER);
+  for (var i = 0; i < all.length; i++) if (String(all[i].id) === String(req.source_id)) src = all[i];
+  if (!src) throw new Error('Источник не найден');
+  if (!canUse_(me, src)) throw new Error('Нет доступа к источнику «' + src.name + '»');
+  var items = req.items || [];
+  for (var k = 0; k < items.length; k++) {
+    var d = String(items[k].decision || '');
+    if (d && DECISION_VALUES.indexOf(d) < 0) throw new Error('Неизвестное решение: ' + d);
+    if (!String(items[k].id || '').trim()) throw new Error('У анкеты нет ID');
+  }
+  var ss = SpreadsheetApp.openByUrl(src.url);
+  var sh = ss.getSheetByName(DECISIONS_SHEET);
+  try {
+    if (!sh) {
+      sh = ss.insertSheet(DECISIONS_SHEET);
+      sh.appendRow(DECISIONS_HEADER);
+      sh.setFrozenRows(1);
+    }
+  } catch (err) {
+    throw new Error('Сервер не может записать решения в «' + src.name + '». Дайте ' + serverEmail_() +
+                    ' право «Редактор» в настройках доступа этой таблицы.');
+  }
+  var values = sh.getDataRange().getValues();
+  var rowOf = {};
+  for (var r = 1; r < values.length; r++) rowOf[String(values[r][0]).trim()] = r + 1;
+  var toDelete = [];
+  var stamp = now_();
+  try {
+    items.forEach(function (it) {
+      var id = String(it.id).trim();
+      var row = [id, String(it.decision || ''), String(it.reason || ''), String(it.comment || ''), me.login, stamp];
+      if (!it.decision) {
+        if (rowOf[id]) toDelete.push(rowOf[id]);
+      } else if (rowOf[id]) {
+        sh.getRange(rowOf[id], 1, 1, row.length).setValues([row]);
+      } else {
+        sh.appendRow(row);
+        rowOf[id] = sh.getLastRow();
+      }
+    });
+    toDelete.sort(function (a, b) { return b - a; }).forEach(function (r) { sh.deleteRow(r); });
+  } catch (err) {
+    throw new Error('Сервер не может записать решения в «' + src.name + '». Дайте ' + serverEmail_() +
+                    ' право «Редактор» в настройках доступа этой таблицы.');
+  }
+  log_(me.login, 'set_decisions', src.name + ': ' + items.length + ' анкет');
+  return { decisions: readDecisions_(ss, ss.getSpreadsheetTimeZone()) };
 }
 
 // ── Журнал ─────────────────────────────────────────────────────────────────

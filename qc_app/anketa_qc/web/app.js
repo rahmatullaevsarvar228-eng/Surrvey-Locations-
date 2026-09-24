@@ -1,7 +1,12 @@
 /* Интерфейс приложения. Без фреймворков и внешних библиотек — всё работает офлайн. */
 "use strict";
 
-const S = { state: null, result: null, history: null, page: "data", anketaFilter: "defect", lastRefresh: null };
+const S = { state: null, result: null, history: null, page: "data", anketaFilter: "defect", lastRefresh: null,
+  reviewFilter: "todo", sel: new Set() };
+const DECISION_CLASS = { "Брак": "d-brak", "Принять": "d-ok", "На перезвон": "d-call" };
+const DECISION_ICON = { "Брак": "❌", "Принять": "✅", "На перезвон": "📞" };
+const ROLE_LABEL = { admin: "Администратор", lead: "Руководитель проекта", user: "Сотрудник" };
+const decisionTag = (d) => d ? h("span", { class: `decision ${DECISION_CLASS[d]}` }, `${DECISION_ICON[d]} ${d}`) : h("span", { class: "decision d-none" }, "не решено");
 const STATUS_LABEL = { RED: "Критично", YELLOW: "Внимание", GREEN: "Норма" };
 const SEVERITY_OPTIONS = [["defect", "Брак"], ["warning", "Предупреждение"]];
 
@@ -28,6 +33,9 @@ const pill = (status) => status ? h("span", { class: `pill ${status}` }, STATUS_
 const svg = (path) => { const s = document.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("viewBox", "0 0 20 20"); s.innerHTML = path; return s; };
 
 async function call(method, url, body, isForm) {
+  // Несохранённые правки настроек отправляем раньше любого другого запроса,
+  // иначе ответ этого запроса затрёт их.
+  if (method === "POST" && url !== "/api/config" && savePending) await flushConfig();
   const opts = { method, headers: {} };
   if (body !== undefined) {
     if (isForm) opts.body = body;
@@ -64,10 +72,26 @@ async function guarded(fn, text) {
 }
 
 let saveTimer;
+let savePending = false;
+async function flushConfig() {
+  clearTimeout(saveTimer);
+  savePending = false;
+  const local = S.state.config;
+  try { Object.assign(S.state, await POST("/api/config", { config: local }), { config: local }); } catch (e) { toast(e.message, true); }
+}
 function saveConfigSoon() {
   clearTimeout(saveTimer);
+  savePending = true;
   saveTimer = setTimeout(async () => {
-    try { S.state = await POST("/api/config", { config: S.state.config }); renderSidebar(); scheduleAuto(); }
+    savePending = false;
+    // Объект настроек не подменяем ответом сервера: открытая страница держит на
+    // него ссылки, и следующие правки иначе ушли бы в устаревшую копию.
+    try {
+      const local = S.state.config;
+      // вливаем ответ в тот же объект: другие обработчики держат на него ссылку
+      Object.assign(S.state, await POST("/api/config", { config: local }), { config: local });
+      renderSidebar(); scheduleAuto();
+    }
     catch (e) { toast(e.message, true); }
   }, 450);
 }
@@ -203,6 +227,7 @@ const PAGES = {
   repetition: { title: "Повтор значения у интервьюера", render: pageRepetition },
   history: { title: "История интервьюеров по волнам", render: pageHistory },
   admin: { title: "Администрирование", render: pageAdmin },
+  review: { title: "Проверка анкет", render: pageReview },
   gps: { title: "GPS-контроль", render: pageGps },
   map: { title: "Карта GPS", render: pageMap },
 };
@@ -226,12 +251,14 @@ function renderSidebar() {
   sel.replaceChildren(...S.state.projects.map((p) => h("option", { value: p, selected: p === S.state.project }, p)));
   document.querySelectorAll("#nav a.needs-result").forEach((a) => a.classList.toggle("disabled", !S.result));
   $("#exportBtn").disabled = !S.result;
+  const rv = S.result && S.result.summary.review;
+  $("#reviewBadge").textContent = rv && rv.enabled && rv.todo ? (rv.todo > 999 ? "999+" : rv.todo) : "";
   $("#sideFoot").textContent = `Версия ${S.state.app.version}`;
   const u = S.state.user || {};
   document.body.classList.toggle("is-admin", u.role === "admin");
   $("#userBox").replaceChildren(
     h("div", { class: "who" }, u.name || u.login || ""),
-    h("div", { class: "team" }, u.role === "admin" ? "Администратор" : (u.team ? `Команда: ${u.team}` : "")),
+    h("div", { class: "team" }, [ROLE_LABEL[u.role] || "", u.role !== "admin" && u.team ? ` · ${u.team}` : ""].join("")),
     h("div", { class: "row" },
       h("button", { class: "btn small", onclick: changePassword }, "Пароль"),
       h("button", { class: "btn small", onclick: logout }, "Выйти")));
@@ -245,6 +272,7 @@ async function refreshState() {
 async function runChecks() {
   await guarded(async () => {
     clearTimeout(saveTimer);
+    savePending = false;   // настройки уходят вместе с запросом проверки
     S.result = await POST("/api/run", { config: S.state.config });
     await refreshState();
     scheduleAuto();
@@ -498,6 +526,14 @@ function pageOverview(root) {
     h("div", { class: "status-bar" }, h("div", { class: "r", style: `width:${sc.RED / ninter * 100}%` }), h("div", { class: "y", style: `width:${sc.YELLOW / ninter * 100}%` }), h("div", { class: "g", style: `width:${sc.GREEN / ninter * 100}%` })),
     h("div", { class: "legend-row" }, ["RED", "YELLOW", "GREEN"].map((k) => h("span", {}, pill(k), " ", h("b", {}, fmt(sc[k])), h("span", { class: "muted" }, " чел."))))));
 
+  const rv = s.review;
+  if (rv && rv.enabled && (rv.todo || rv["Брак"] || rv["Принять"] || rv["На перезвон"])) {
+    root.append(h("div", { class: `notice ${rv.todo ? "warn" : "ok"}` }, h("div", { style: "flex:1" },
+      rv.todo ? h("b", {}, `Ждут решения руководителя: ${fmt(rv.todo)} анкет. `) : h("b", {}, "Все подозрительные анкеты разобраны. "),
+      `Брак: ${fmt(rv["Брак"])} · На перезвон: ${fmt(rv["На перезвон"])} · Принято: ${fmt(rv["Принять"])}`),
+      h("button", { class: "btn small", onclick: () => go("review") }, "Открыть проверку"),
+      h("button", { class: "btn small", onclick: () => exportReport("clean") }, "Чистая база")));
+  }
   root.append(h("div", { class: "grid-2" },
     h("div", { class: "card" }, h("h2", {}, "Причины брака"), h("p", { class: "hint" }, "Одна анкета может иметь несколько причин."), reasonsTable(R.defect_reasons, "% брака")),
     h("div", { class: "card" }, h("h2", {}, "Предупреждения"), h("p", { class: "hint" }, "Сигналы для ручной проверки — сами по себе не брак."), reasonsTable(R.warning_reasons, "% анкет"))));
@@ -535,7 +571,8 @@ function pageInterviewers(root) {
 
 function showInterviewer(inter) {
   const rows = S.result.anketas.filter((a) => a.inter === inter && (a.defect || a.warning));
-  openModal(`Интервьюер ${inter}`, table(anketaColumns(), rows, { search: false, height: 460, rowClass: (r) => r.defect ? "row-RED" : "row-YELLOW" }));
+  openModal(`Интервьюер ${inter}`, table(anketaColumns(), rows, { search: false, height: 460, rowClass: (r) => r.defect ? "row-RED" : "row-YELLOW",
+    onClick: (r) => openAnketa(r.pos) }));
 }
 
 function anketaColumns() {
@@ -545,6 +582,7 @@ function anketaColumns() {
     { key: "duration", label: "Мин", num: true, digits: 1 },
     { key: "reasons", label: "Причина брака", wrap: true },
     { key: "warnings", label: "Предупреждения", wrap: true },
+    { key: "decision", label: "Решение", render: (r) => decisionTag(r.decision) },
   ];
 }
 
@@ -557,7 +595,7 @@ function pageAnketas(root) {
   const rows = all.filter(filters[S.anketaFilter][1]);
   root.append(h("div", { class: "card" },
     table([...anketaColumns().slice(0, 3), { key: "device", label: "Device ID" }, ...anketaColumns().slice(3)], rows,
-      { tools: seg, rowClass: (r) => r.defect ? "row-RED" : r.warning ? "row-YELLOW" : "", height: 640 })));
+      { tools: seg, rowClass: (r) => r.defect ? "row-RED" : r.warning ? "row-YELLOW" : "", height: 640, onClick: (r) => openAnketa(r.pos) })));
 }
 
 function pageCities(root) {
@@ -710,7 +748,7 @@ function teamSourcesCard() {
         await guarded(async () => {
           S.state.remote_sources = await POST("/api/remote/sources/add", { name: name.value, url: url.value, sheet: sheet.value });
           const added = S.state.remote_sources.find((x) => x.name === name.value.trim());
-          if (added) { c.remote_sources = [...new Set([...(c.remote_sources || []), added.id])]; saveConfigSoon(); }
+          if (added) { const cc = cfg(); cc.remote_sources = [...new Set([...(cc.remote_sources || []), added.id])]; saveConfigSoon(); }
           toast("Таблица подключена"); go("data");
         }, "Проверяю доступ к таблице…");
       } }, "Подключить")));
@@ -822,10 +860,10 @@ async function pageAdmin(root) {
   const login = h("input", { type: "text", placeholder: "логин латиницей, напр. ali.k", style: "width:210px" });
   const name = h("input", { type: "text", placeholder: "Имя и фамилия", style: "flex:1;min-width:180px" });
   const team = h("input", { type: "text", placeholder: "Команда / проект", list: "teamsList", style: "width:200px" });
-  const role = select([["user", "Сотрудник"], ["admin", "Администратор"]], "user", () => {});
+  const role = select([["user", "Сотрудник"], ["lead", "Руководитель проекта"], ["admin", "Администратор"]], "user", () => {});
   root.append(h("div", { class: "card" },
     h("h2", {}, "Новый сотрудник"),
-    h("p", { class: "hint" }, "Пароль создаётся автоматически и показывается один раз. Команда определяет, какие Google-таблицы увидит сотрудник: у каждой команды свои."),
+    h("p", { class: "hint" }, "Пароль создаётся автоматически и показывается один раз. Команда определяет, какие Google-таблицы увидит сотрудник: у каждой команды свои. Решения по анкетам (брак / принять / на перезвон) ставит только «Руководитель проекта»."),
     h("datalist", { id: "teamsList" }, teams.map((t) => h("option", { value: t }))),
     h("div", { class: "row" }, login, name, team, role,
       h("button", { class: "btn primary", onclick: async () => {
@@ -848,7 +886,10 @@ async function pageAdmin(root) {
           const t = prompt(`Команда для ${u.login}`, u.team || "");
           if (t !== null && await act("update_user", { login: u.login, team: t }, "Команда изменена")) go("admin");
         } }, "изменить")) },
-      { key: "role", label: "Роль", render: (u) => u.role === "admin" ? h("span", { class: "pill plain neutral" }, "Администратор") : "Сотрудник" },
+      { key: "role", label: "Роль", render: (u) => u.login === S.state.user.login ? ROLE_LABEL[u.role]
+        : select([["user", "Сотрудник"], ["lead", "Руководитель проекта"], ["admin", "Администратор"]], u.role, async (v) => {
+          if (await act("update_user", { login: u.login, role: v }, `Роль: ${ROLE_LABEL[v]}`)) go("admin");
+        }) },
       { key: "last_login", label: "Последний вход" },
       { key: "actions", label: "", render: (u) => h("div", { class: "row" },
         h("button", { class: "btn small", onclick: async () => {
@@ -866,7 +907,7 @@ async function pageAdmin(root) {
     h("p", { class: "hint" }, "Входы, неудачные попытки, подключение таблиц и действия администратора. Полный журнал — на листе «Журнал» в таблице сервера."),
     table([{ key: "time", label: "Время" }, { key: "login", label: "Логин" },
       { key: "action", label: "Действие", render: (x) => ({ login: "вход", login_failed: "неверный пароль", login_blocked: "вход заблокирован",
-        fetch: "загрузка анкет", add_source: "подключил таблицу", delete_source: "отключил таблицу", create_user: "создал сотрудника",
+        fetch: "загрузка анкет", set_decisions: "решения по анкетам", add_source: "подключил таблицу", delete_source: "отключил таблицу", create_user: "создал сотрудника",
         update_user: "изменил сотрудника", reset_password: "сбросил пароль", delete_user: "удалил сотрудника", change_password: "сменил пароль" })[x.action] || x.action },
       { key: "detail", label: "Подробности", wrap: true }], log, { height: 420 })));
 }
@@ -999,8 +1040,140 @@ function pageMap(root) {
       flagged, { sortKey: "dist", rowClass: () => "row-RED", height: 420, empty: "Все анкеты у плановых точек" })));
 }
 
+
+// ── Проверка анкет руководителем ─────────────────────────────────────────────
+function reviewFilters() {
+  return {
+    todo: ["Нужно решить", (a) => (a.defect || a.warning) && !a.decision],
+    call: ["На перезвон", (a) => a.decision === "На перезвон"],
+    brak: ["Брак", (a) => a.decision === "Брак"],
+    ok: ["Принято", (a) => a.decision === "Принять"],
+    all: ["Все подозрительные", (a) => a.defect || a.warning || a.decision],
+  };
+}
+
+async function decide(positions, decision, comment) {
+  if (!positions.length) return toast("Отметьте анкеты", true);
+  await guarded(async () => {
+    S.result = await POST("/api/decisions", { positions, decision, comment: comment || "" });
+    S.sel.clear();
+    renderSidebar();
+    toast(decision ? `${DECISION_ICON[decision]} ${decision}: ${positions.length} анк.` : `Решение снято: ${positions.length} анк.`);
+  }, "Сохраняю решения в Google-таблицу…");
+}
+
+function pageReview(root) {
+  if (!S.result) return noResult(root);
+  const rv = S.result.summary.review;
+  if (!rv.enabled) {
+    root.append(h("div", { class: "card" }, h("div", { class: "empty" }, h("b", {}, "Решения по анкетам недоступны"),
+      !/^Google Sheets/.test(S.result.summary.source || "")
+        ? "Решения сохраняются в Google-таблицу, откуда пришли анкеты. Загрузите анкеты из подключённой таблицы на странице «Данные»."
+        : "Выберите колонку «ID анкеты» на странице «Колонки» — по ней сохраняются решения.",
+      h("div", { style: "margin-top:14px" }, h("button", { class: "btn", onclick: () => go("data") }, "К данным")))));
+    return;
+  }
+  const all = S.result.anketas;
+  const filters = reviewFilters();
+  const rows = all.filter(filters[S.reviewFilter][1]);
+  const visible = new Set(rows.map((r) => r.pos));
+  [...S.sel].forEach((p) => { if (!visible.has(p)) S.sel.delete(p); });
+
+  root.append(h("div", { class: "stats" },
+    h("div", { class: "stat yellow" }, h("div", { class: "k" }, "Нужно решить"), h("div", { class: "v" }, fmt(rv.todo)), h("div", { class: "s" }, "подозрительные без решения")),
+    h("div", { class: "stat red" }, h("div", { class: "k" }, "❌ Брак"), h("div", { class: "v" }, fmt(rv["Брак"]))),
+    h("div", { class: "stat" }, h("div", { class: "k" }, "📞 На перезвон"), h("div", { class: "v" }, fmt(rv["На перезвон"]))),
+    h("div", { class: "stat" }, h("div", { class: "k" }, "✅ Принято"), h("div", { class: "v" }, fmt(rv["Принять"])))));
+
+  const count = h("span", { class: "count" });
+  const comment = h("input", { type: "text", placeholder: "Комментарий (необязательно): «респондент подтвердил», «не дозвонились»…" });
+  const updateCount = () => { count.textContent = S.sel.size ? `Выбрано: ${S.sel.size}` : "Отметьте анкеты"; };
+  updateCount();
+  const bulk = rv.can_decide ? h("div", { class: "bulk" }, count, comment,
+    ...["Брак", "Принять", "На перезвон"].map((d) => h("button", { class: `btn ${DECISION_CLASS[d]}`, onclick: async () => { await decide([...S.sel], d, comment.value); go("review"); } }, `${DECISION_ICON[d]} ${d}`)),
+    h("button", { class: "btn ghost", onclick: async () => { await decide([...S.sel], "", ""); go("review"); } }, "Снять решение"))
+    : h("div", { class: "notice info" }, "Решения ставит руководитель проекта. Вы видите их, но менять не можете.");
+
+  const seg = h("div", { class: "segmented" }, Object.entries(filters).map(([k, [label, fn]]) =>
+    h("button", { class: S.reviewFilter === k ? "on" : "", onclick: () => { S.reviewFilter = k; S.sel.clear(); go("review"); } }, `${label} · ${fmt(all.filter(fn).length)}`)));
+
+  const checkAll = h("input", { type: "checkbox", title: "Выбрать все", onclick: (e) => e.stopPropagation(), onchange: (e) => {
+    rows.forEach((r) => (e.target.checked ? S.sel.add(r.pos) : S.sel.delete(r.pos)));
+    root.querySelectorAll("td.chk input").forEach((c) => { c.checked = e.target.checked; });
+    updateCount();
+  } });
+  const cols = [
+    ...(rv.can_decide ? [{ key: "chk", label: "", render: (r) => h("input", { type: "checkbox", checked: S.sel.has(r.pos),
+      onclick: (e) => e.stopPropagation(), onchange: (e) => { e.target.checked ? S.sel.add(r.pos) : S.sel.delete(r.pos); updateCount(); } }) }] : []),
+    { key: "decision", label: "Решение", render: (r) => decisionTag(r.decision) },
+    { key: "id", label: "ID анкеты" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
+    { key: "start", label: "Старт", sortVal: (r) => r.start && r.start.split(/[. :]/).reverse().join("") },
+    { key: "reasons", label: "Почему система отметила", wrap: true, render: (r) => r.reasons || r.warnings },
+    { key: "decision_comment", label: "Комментарий", wrap: true, render: (r) => r.decision_comment ? `${r.decision_comment} (${r.decision_by})` : "" },
+  ];
+  const tbl = table(cols, rows, { tools: seg, height: 620, onClick: (r) => openAnketa(r.pos), sortKey: "start", asc: true,
+    rowClass: (r) => r.defect ? "row-RED" : r.warning ? "row-YELLOW" : "", empty: S.reviewFilter === "todo" ? "Все подозрительные анкеты разобраны 🎉" : "Нет анкет" });
+  if (rv.can_decide) {
+    const th = tbl.querySelector("thead th");
+    th.className = "chk"; th.replaceChildren(checkAll); th.onclick = null;
+    tbl.querySelectorAll("tbody td:first-child").forEach((td) => td.classList.add("chk"));
+  }
+  root.append(bulk, h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Анкеты на проверку"),
+      h("p", { class: "hint" }, "Нажмите на строку — откроется объяснение, почему система отметила анкету, и исходная строка из Google-таблицы. Решения записываются на лист «Решения ОТК» той же таблицы и видны всей команде.")),
+      h("button", { class: "btn", onclick: () => exportReport("clean") }, "Чистая база (Excel)")),
+    tbl));
+}
+
+async function openAnketa(pos) {
+  const d = await guarded(() => GET(`/api/anketa/${pos}`), "Открываю анкету…");
+  if (!d) return;
+  const rv = S.result.summary.review;
+  const a = S.result.anketas.find((x) => x.pos === pos) || {};
+  let onlyHl = false;
+  const valuesBox = h("div", {});
+  const drawValues = () => valuesBox.replaceChildren(table([
+      { key: "column", label: "Колонка", wrap: true }, { key: "value", label: "Значение", wrap: true }],
+    d.values.filter((v) => !onlyHl || v.highlight), { search: true, height: 380, rowClass: (v) => (v.highlight ? "hl" : "") }));
+  drawValues();
+
+  const comment = h("input", { type: "text", placeholder: "Комментарий", value: a.decision_comment || "" });
+  const decideBox = rv.enabled && rv.can_decide ? h("div", { class: "decide-box" },
+    h("b", {}, "Решение:"), comment,
+    ...["Брак", "Принять", "На перезвон"].map((dec) => h("button", { class: `btn ${DECISION_CLASS[dec]}`, onclick: async () => {
+      await decide([pos], dec, comment.value); closeModal(); go(S.page);
+    } }, `${DECISION_ICON[dec]} ${dec}`)),
+    a.decision ? h("button", { class: "btn ghost", onclick: async () => { await decide([pos], "", ""); closeModal(); go(S.page); } }, "Снять") : null) : null;
+
+  const body = h("div", {},
+    h("div", { class: "facts" },
+      h("div", {}, h("b", {}, "Решение"), decisionTag(a.decision)),
+      h("div", {}, h("b", {}, "Город"), d.city || "—"),
+      h("div", {}, h("b", {}, "Интервьюер"), d.inter || "—"),
+      h("div", {}, h("b", {}, "Устройство"), d.device || "—"),
+      h("div", {}, h("b", {}, "Старт → финиш"), `${d.start || "—"} → ${(d.end || "—").slice(-8)}`),
+      h("div", {}, h("b", {}, "Длительность"), d.duration != null ? `${d.duration} мин` : "—")),
+    a.decision_comment ? h("div", { class: "notice info" }, `Комментарий (${a.decision_by}): ${a.decision_comment}`) : null,
+    decideBox,
+    h("h3", {}, d.issues.length ? "Почему система отметила анкету" : "Замечаний нет"),
+    h("ul", { class: "why" }, d.issues.map((i) => h("li", { class: i.severity },
+      h("span", { class: `pill ${i.severity === "defect" ? "RED" : "YELLOW"}` }, i.severity === "defect" ? "Брак" : "Предупреждение"),
+      h("div", { class: "t" }, i.label),
+      h("div", {}, i.text),
+      h("div", { class: "l" }, "Логика: ", i.logic),
+      i.columns.length ? h("div", { class: "cols" }, i.columns.map((c) => h("span", { class: "chip" }, h("span", {}, c)))) : null))),
+    d.previous ? h("div", { class: "notice info" }, `Предыдущая анкета на этом устройстве: ${d.previous.id}, ${d.previous.start} → ${d.previous.end}`) : null,
+    h("div", { class: "row", style: "justify-content:space-between;margin:6px 0 10px" },
+      h("h3", { style: "margin:0" }, "Исходная строка из таблицы"),
+      h("label", { class: "row small muted" }, h("input", { type: "checkbox", onchange: (e) => { onlyHl = e.target.checked; drawValues(); } }), "Только колонки, по которым сработали проверки")),
+    h("p", { class: "muted small", style: "margin-top:0" }, "Жёлтым выделены колонки, которые читала проверка. Значения — ровно как в выгрузке."),
+    valuesBox);
+  openModal(`Анкета ${d.id}`, body, true);
+}
+
 // ── Модальное окно ──────────────────────────────────────────────────────────
-function openModal(title, body) {
+function openModal(title, body, wide) {
+  document.querySelector(".sheet-panel").classList.toggle("wide", !!wide);
   $("#modalTitle").textContent = title;
   $("#modalBody").replaceChildren(body);
   $("#modal").hidden = false;

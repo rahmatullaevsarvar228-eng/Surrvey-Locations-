@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
-from . import APP_NAME, __version__, config, engine, export, sources
+from . import APP_NAME, __version__, config, engine, export, review, sources
 from .remote import RemoteClient, RemoteError, combine
 from .history import Store
 
@@ -33,10 +33,38 @@ class Session:
         self.sources = []
         self.server_email = ""
         self.seen_ids = None   # ID анкет на прошлой проверке — чтобы показать, сколько пришло новых
+        # Решения руководителя: {(id источника, ID анкеты): {...}} и названия источников
+        self.decisions = {}
+        self.source_names = {}
 
     def logout(self):
         self.client, self.user, self.sources, self.server_email = None, None, [], ""
         self.sheets, self.source_label, self.result, self.seen_ids = {}, None, None, None
+        self.decisions, self.source_names = {}, {}
+
+    # --- решения по анкетам ------------------------------------------------
+    def row_sources(self):
+        """pos анкеты → id источника (по колонке «Источник» объединённой таблицы)."""
+        if not self.result or not self.source_names:
+            return {}
+        raw = self.result["raw"]
+        by_name = {name: sid for sid, name in self.source_names.items()}
+        if "Источник" in raw.columns and len(self.source_names) > 1:
+            return {pos: by_name.get(v) for pos, v in raw["Источник"].items()}
+        only = next(iter(self.source_names))
+        return {pos: only for pos in raw.index}
+
+    def decisions_by_pos(self):
+        if not self.result:
+            return {}
+        srcs = self.row_sources()
+        ids = self.result["df"].set_index("pos")["row_id"]
+        out = {}
+        for pos, sid in srcs.items():
+            d = self.decisions.get((sid, str(ids.get(pos))))
+            if d and d.get("decision"):
+                out[pos] = d
+        return out
 
     # --- проект ------------------------------------------------------------
     def open_project(self, name):
@@ -84,6 +112,9 @@ class Session:
                 "Повтор значения", r["repetition"]["rows"], status_col="Статус")
         if kind == "answers":
             return f"otvety_{slug}_{stamp}.xlsx", export.simple_report("Все ответы", r["answers"]["all"])
+        if kind == "clean":
+            clean, todo = review.clean_base(r, self.decisions_by_pos())
+            return f"chistaya_baza_{slug}_{stamp}.xlsx", export.clean_report(clean, todo)
         raise ValueError(f"Неизвестный отчёт: {kind}")
 
 
@@ -101,6 +132,14 @@ def _clean(v):
     return v
 
 
+def _clean_deep(obj):
+    if isinstance(obj, dict):
+        return {k: _clean_deep(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_clean_deep(v) for v in obj]
+    return _clean(obj)
+
+
 def _records(rows):
     return [{k: _clean(v) for k, v in r.items()} for r in rows]
 
@@ -110,7 +149,11 @@ def result_payload(sess):
     df = r["df"]
     n = len(df)
     n_def = int(df["is_defect"].sum())
+    dec = sess.decisions_by_pos()
     anketas = [{
+        "pos": int(x.pos), "decision": (dec.get(x.pos) or {}).get("decision") or "",
+        "decision_comment": (dec.get(x.pos) or {}).get("comment") or "",
+        "decision_by": (dec.get(x.pos) or {}).get("by") or "",
         "id": _clean(x.row_id), "city": _clean(x.city), "inter": _clean(x.inter),
         "device": _clean(x.deviceid), "start": _clean(x.start), "end": _clean(x.end),
         "duration": None if pd.isna(x.duration_min) else round(float(x.duration_min), 1),
@@ -137,6 +180,12 @@ def result_payload(sess):
             "source": sess.source_label, "sheet": cfg.get("sheet"),
             "status_counts": {s: inter_status.count(s) for s in ("RED", "YELLOW", "GREEN")},
             "wave_median": r["wave_median"],
+            "review": {
+                "enabled": bool(sess.source_names) and bool(cfg["mapping"].get("id")),
+                "can_decide": (sess.user or {}).get("role") in ("lead", "admin"),
+                "todo": sum(1 for a in anketas if (a["defect"] or a["warning"]) and not a["decision"]),
+                **{d: sum(1 for a in anketas if a["decision"] == d) for d in review.DECISIONS},
+            },
         },
         "defect_reasons": engine.issue_breakdown(df, engine.DEFECT),
         "warning_reasons": engine.issue_breakdown(df, engine.WARNING),
@@ -245,7 +294,10 @@ def create_app(data_dir, client_factory=RemoteClient):
         return reload_sources()
 
     def load_remote(ids):
-        frames = [sess.client.fetch_frame(i) for i in ids]
+        fetched = [sess.client.fetch_frame(i) for i in ids]
+        frames = [(name, df) for _, name, df, _ in fetched]
+        sess.source_names = {sid: name for sid, name, _, _ in fetched}
+        sess.decisions = {(sid, str(d["id"])): d for sid, _, _, decs in fetched for d in decs}
         sheets = combine(frames)
         if not sheets:
             raise sources.SourceError("В выбранных источниках нет данных")
@@ -288,6 +340,46 @@ def create_app(data_dir, client_factory=RemoteClient):
         payload["refresh"] = {"new": len(new), "new_defects": int(len(new_def)),
                               "at": datetime.now().strftime("%H:%M")}
         return jsonify(payload)
+
+    @app.get("/api/anketa/<int:pos>")
+    def anketa(pos):
+        if sess.result is None or pos not in sess.result["raw"].index:
+            return fail("Анкета не найдена", 404)
+        return jsonify(_clean_deep(review.anketa_detail(sess.result, sess.config, pos,
+                                                        sess.decisions_by_pos().get(pos))))
+
+    @app.post("/api/decisions")
+    def decisions():
+        """Решение руководителя по одной или нескольким анкетам → лист
+        «Решения ОТК» в Google-таблице, откуда пришла анкета."""
+        if (sess.user or {}).get("role") not in ("lead", "admin"):
+            return fail("Решения по анкетам ставит только руководитель проекта", 403)
+        if sess.result is None:
+            return fail("Сначала запустите проверку")
+        if not sess.source_names:
+            return fail("Решения сохраняются в Google-таблице — загрузите анкеты из подключённой таблицы")
+        if not sess.config["mapping"].get("id"):
+            return fail("Выберите колонку «ID анкеты» на странице «Колонки» — по ней сохраняются решения")
+        body = request.json or {}
+        decision, comment = body.get("decision") or "", body.get("comment") or ""
+        if decision and decision not in review.DECISIONS:
+            return fail("Неизвестное решение")
+        df = sess.result["df"].set_index("pos")
+        srcs = sess.row_sources()
+        groups = {}
+        for pos in body.get("positions") or []:
+            if pos not in df.index:
+                continue
+            groups.setdefault(srcs.get(pos), []).append({
+                "id": str(df.at[pos, "row_id"]), "decision": decision, "comment": comment,
+                "reason": df.at[pos, "reason_text"] or df.at[pos, "warning_text"]})
+        if not groups:
+            return fail("Не выбрано ни одной анкеты")
+        for sid, items in groups.items():
+            saved = sess.client.call("set_decisions", source_id=sid, items=items)["decisions"]
+            sess.decisions = {k: v for k, v in sess.decisions.items() if k[0] != sid}
+            sess.decisions.update({(sid, str(d["id"])): d for d in saved})
+        return jsonify(result_payload(sess))
 
     @app.post("/api/admin/<action>")
     def admin(action):
