@@ -423,3 +423,21 @@ function setup() {
   });
   Logger.log('Создан администратор. Логин: admin   Пароль: ' + password + '   — сохраните его.');
 }
+
+/** Забыли пароль администратора — запустите эту функцию из редактора:
+ *  новый пароль появится в журнале выполнения. */
+function resetAdminPassword() {
+  var user = findUser_('admin');
+  if (!user) {
+    Logger.log('Пользователя admin нет — запустите setup().');
+    return;
+  }
+  var password = newPassword_();
+  var salt = Utilities.getUuid();
+  setCell_(SHEET_USERS, USERS_HEADER, user._row, 'salt', salt);
+  setCell_(SHEET_USERS, USERS_HEADER, user._row, 'hash', hashPassword_(password, salt));
+  setCell_(SHEET_USERS, USERS_HEADER, user._row, 'active', 'да');
+  CacheService.getScriptCache().remove('fail:admin');
+  log_('admin', 'reset_password', 'из редактора Apps Script');
+  Logger.log('Новый пароль администратора. Логин: admin   Пароль: ' + password);
+}

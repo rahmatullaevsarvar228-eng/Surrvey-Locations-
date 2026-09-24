@@ -192,4 +192,14 @@ assert.deepStrictEqual(solo.created, ["AnketaQC — сервер"]);
 const soloPass = solo.logs.join("\n").match(/Пароль: (\S+)/)[1];
 assert.ok(solo.call({ action: "login", login: "admin", password: soloPass }).token);
 
+// забытый пароль администратора: сброс из редактора
+const r = makeEnv();
+r.ctx.setup();
+const oldPass = r.logs.join("\n").match(/Пароль: (\S+)/)[1];
+r.ctx.resetAdminPassword();
+const newPass = r.logs.join("\n").match(/Новый пароль администратора. Логин: admin   Пароль: (\S+)/)[1];
+assert.notStrictEqual(oldPass, newPass);
+assert.match(r.call({ action: "login", login: "admin", password: oldPass }).error, /Неверный/);
+assert.ok(r.call({ action: "login", login: "admin", password: newPass }).token);
+
 console.log("gas_harness: OK");
