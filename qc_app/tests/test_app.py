@@ -374,6 +374,15 @@ def test_decisions_detail_and_clean_base(tmp_path, demo_bytes):
     assert str(first["id"]) not in ids and str(last["id"]) in ids
     assert len(ids) < len(data)
 
+    # проверяется отдельный лист второй таблицы — решение уходит именно в неё
+    client.post("/api/sheet", json={"sheet": "Т2"})
+    r = client.post("/api/run", json={}).get_json()
+    pos = r["anketas"][0]["pos"]
+    before = len(FakeClient.saved.get("Т1", {}))
+    client.post("/api/decisions", json={"positions": [pos], "decision": "На перезвон"})
+    assert len(FakeClient.saved["Т1"]) == before
+    assert str(r["anketas"][0]["id"]) in FakeClient.saved["Т2"]
+
     # обычный сотрудник решения ставить не может
     c2 = create_app(tmp_path / "u", client_factory=FakeClient).test_client()
     login(c2, "ali")

@@ -133,6 +133,8 @@ def clean_base(result, decisions_by_pos):
     clean = raw.loc[sorted(keep)].copy()
     clean.insert(0, "Статус ОТК", [(decisions_by_pos.get(p) or {}).get("decision") or "Без замечаний"
                                    for p in sorted(keep)])
+    done = df.set_index("pos")["completed"]
+    clean.insert(1, "Завершено", ["Да" if done.get(p, True) else "Нет (скринаут)" for p in sorted(keep)])
     by_pos = df.set_index("pos")
     todo = raw.loc[sorted(pending)].copy()
     todo.insert(0, "Причина (система)", [by_pos.at[p, "reason_text"] for p in sorted(pending)])

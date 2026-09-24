@@ -51,8 +51,9 @@ class Session:
         by_name = {name: sid for sid, name in self.source_names.items()}
         if "Источник" in raw.columns and len(self.source_names) > 1:
             return {pos: by_name.get(v) for pos, v in raw["Источник"].items()}
-        only = next(iter(self.source_names))
-        return {pos: only for pos in raw.index}
+        # проверяется лист одной из таблиц — решения идут именно в неё
+        sid = by_name.get(self.config.get("sheet")) or next(iter(self.source_names))
+        return {pos: sid for pos in raw.index}
 
     def decisions_by_pos(self):
         if not self.result:

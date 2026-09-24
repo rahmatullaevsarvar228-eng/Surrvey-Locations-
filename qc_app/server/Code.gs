@@ -374,6 +374,7 @@ function setDecisions_(me, req) {
   try {
     if (!sh) {
       sh = ss.insertSheet(DECISIONS_SHEET);
+      sh.getRange('A:A').setNumberFormat('@');   // ID как текст — не терять ведущие нули
       sh.appendRow(DECISIONS_HEADER);
       sh.setFrozenRows(1);
     }

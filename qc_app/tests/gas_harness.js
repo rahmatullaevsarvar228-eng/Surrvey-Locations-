@@ -22,6 +22,7 @@ class Sheet {
   }
   getRange(row, col, nr, nc) {
     if (this.readonly) throw new Error("нет прав на запись");
+    if (typeof row === "string") return { setNumberFormat() {} };
     return {
       setValue: (v) => { while (this.rows.length < row) this.rows.push([]); this.rows[row - 1][col - 1] = v; },
       setValues: (vals) => { while (this.rows.length < row) this.rows.push([]); vals[0].forEach((v, j) => { this.rows[row - 1][col - 1 + j] = v; }); },
