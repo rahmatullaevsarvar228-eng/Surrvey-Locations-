@@ -41,19 +41,31 @@ jobs:
           # Ставим на все файлы пометку «скачано из интернета», как Windows делает
           # при распаковке скачанного zip, — именно так падал запуск у пользователя.
           $zone = "[ZoneTransfer]`r`nZoneId=3"
+          # Запускаем напрямую (CreateProcess), а не через проводник: проводник на
+          # помеченном exe показывает окно SmartScreen, которое в CI некому нажать.
+          function Invoke-SelfTest {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = (Resolve-Path "dist\AnketaQC\AnketaQC.exe").Path
+            $psi.Arguments = "--selftest"
+            $psi.UseShellExecute = $false
+            $proc = [System.Diagnostics.Process]::Start($psi)
+            $proc.WaitForExit()
+            return $proc.ExitCode
+          }
           $files = Get-ChildItem dist\AnketaQC -Recurse -File -Include *.dll,*.exe,*.pyd
           $files | ForEach-Object { Set-Content -Path $_.FullName -Stream Zone.Identifier -Value $zone }
           Write-Host "Marked $($files.Count) files"
           # Для справки: без снятия пометки и без .config (так было в версии 1.0.0)
           Rename-Item dist\AnketaQC\AnketaQC.exe.config AnketaQC.exe.config.off
           $env:ANKETA_QC_NO_UNBLOCK = "1"
-          $old = Start-Process -FilePath "dist\AnketaQC\AnketaQC.exe" -ArgumentList "--selftest" -Wait -PassThru
-          Write-Host "Without the fix: exit code $($old.ExitCode) (expected non-zero)"
+          $old = Invoke-SelfTest
+          Write-Host "Without the fix: exit code $old (expected non-zero)"
           Remove-Item Env:ANKETA_QC_NO_UNBLOCK
           Rename-Item dist\AnketaQC\AnketaQC.exe.config.off AnketaQC.exe.config
           $files | ForEach-Object { Set-Content -Path $_.FullName -Stream Zone.Identifier -Value $zone }
-          $p = Start-Process -FilePath "dist\AnketaQC\AnketaQC.exe" -ArgumentList "--selftest" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
+          $code = Invoke-SelfTest
+          Write-Host "With the fix: exit code $code"
+          if ($code -ne 0) { throw "Self-test failed with exit code $code" }
 
       - name: Build installer
         shell: pwsh
