@@ -92,6 +92,7 @@ DEFAULT_CONFIG = {
         "no_gps_severity": "warning",
         "plan": {},                  # {город: {"points": [{lat, lon, street_ru}]}}
     },
+    "quotas": {"by_city": True, "dims": [], "plan": []},
     "remote_sources": [],        # ID таблиц Google Sheets проекта на сервере доступа
     "auto_refresh_min": 15,      # автообновление анкет из таблиц, 0 — выключено
 }

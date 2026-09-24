@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
-from . import APP_NAME, __version__, config, engine, export, review, sources
+from . import APP_NAME, __version__, config, engine, export, quotas, review, sources
 from .remote import RemoteClient, RemoteError, combine
 from .history import Store
 
@@ -112,6 +112,11 @@ class Session:
                 "Повтор значения", r["repetition"]["rows"], status_col="Статус")
         if kind == "answers":
             return f"otvety_{slug}_{stamp}.xlsx", export.simple_report("Все ответы", r["answers"]["all"])
+        if kind == "quotas":
+            q = quotas.compute(r, self.config, self.decisions_by_pos())
+            if not q.get("enabled"):
+                raise ValueError("Квоты не настроены")
+            return f"kvoty_{slug}_{stamp}.xlsx", export.simple_report("Квоты", q["rows"], status_col="Статус")
         if kind == "clean":
             clean, todo = review.clean_base(r, self.decisions_by_pos())
             return f"chistaya_baza_{slug}_{stamp}.xlsx", export.clean_report(clean, todo)
@@ -130,6 +135,13 @@ def _clean(v):
     if v is pd.NaT:
         return None
     return v
+
+
+def _quotas_safe(sess):
+    try:
+        return _clean_deep(quotas.compute(sess.result, sess.config, sess.decisions_by_pos()))
+    except ValueError as e:          # например, неверно заданы интервалы возраста
+        return {"enabled": False, "error": str(e)}
 
 
 def _clean_deep(obj):
@@ -198,6 +210,7 @@ def result_payload(sess):
         "rule_errors": r["rule_errors"],
         "legend": engine.status_legend(cfg),
         "geo": r.get("geo") or {"enabled": False},
+        "quotas": _quotas_safe(sess),
     }
 
 
@@ -479,6 +492,36 @@ def create_app(data_dir, client_factory=RemoteClient):
         for df in sheets.values():
             try:
                 return jsonify(geo.plan_from_frame(df))
+            except ValueError as e:
+                errors.append(str(e))
+        return fail(errors[0] if errors else "Пустой файл")
+
+    @app.post("/api/quotas/template")
+    def quotas_template():
+        if sess.result is None:
+            return fail("Сначала запустите проверку — строки плана берутся из данных")
+        try:
+            return jsonify(quotas.template(sess.result, sess.config, sess.config["quotas"].get("plan")))
+        except ValueError as e:
+            return fail(str(e))
+
+    @app.post("/api/quotas/from-geo")
+    def quotas_from_geo():
+        plan = quotas.plan_from_geo(sess.config)
+        if not plan:
+            return fail("В плане GPS-точек нет цифр по городам")
+        return jsonify(plan)
+
+    @app.post("/api/quotas/parse")
+    def quotas_parse():
+        f = request.files.get("file")
+        if f is None:
+            return fail("Файл не получен")
+        labels = quotas.dim_labels(sess.config)
+        errors = []
+        for df in sources.read_excel_bytes(f.read()).values():
+            try:
+                return jsonify(quotas.plan_from_frame(df, labels))
             except ValueError as e:
                 errors.append(str(e))
         return fail(errors[0] if errors else "Пустой файл")

@@ -229,3 +229,38 @@ def test_gps_plan_from_excel():
     assert list(plan) == ["Бухара", "Нукус"] and len(plan["Бухара"]["points"]) == 2
     with pytest.raises(ValueError):
         geo.plan_from_frame(pd.DataFrame({"x": [1]}))
+
+
+def test_quotas():
+    from anketa_qc import quotas
+    assert quotas.parse_bins("18-24, 25-34,60+")[2][2] == "60+"
+    with pytest.raises(ValueError):
+        quotas.parse_bins("молодые")
+    cfg = config.default_config()
+    rows = []
+    for i, (city, sex, age) in enumerate([("Ташкент", "Ж", 20), ("Ташкент", "Ж", 22), ("Ташкент", "М", 40),
+                                          ("Бухара", "Ж", 30), ("Бухара", "Ж", 31)]):
+        r = make_row(i, f"D{i}", f"I{i}", f"2025-09-01 {9 + i}:00", 10 if i != 1 else 2, city=city)  # №1 — брак (коротко)
+        r["Пол"], r["Возраст"] = sex, age
+        rows.append(r)
+    df_in = pd.DataFrame(rows)
+    cfg["mapping"] = config.suggest_mapping(list(df_in.columns))
+    cfg["quotas"] = {"by_city": True, "dims": [{"label": "Пол", "column": "Пол", "bins": ""},
+                                                {"label": "Возраст", "column": "Возраст", "bins": "18-24,25-44"}],
+                     "plan": [{"keys": {"Город": "Ташкент", "Пол": "Ж", "Возраст": "18-24"}, "target": 3},
+                              {"keys": {"Город": "Бухара", "Пол": "Ж", "Возраст": "25-44"}, "target": 1}]}
+    res = engine.run(df_in, cfg)
+    q = quotas.compute(res, cfg, {})
+    tash, buh = q["rows"]
+    assert (tash["Засчитано"], tash["Под вопросом"], tash["Осталось"], tash["Статус"]) == (1, 1, 2, "YELLOW")
+    assert (buh["Засчитано"], buh["Перебор"], buh["Статус"]) == (2, 1, "RED")
+    assert q["outside_plan"][0]["Пол"] == "М"
+    # брак руководителя уходит из «под вопросом» в «брак»
+    pos1 = int(res["df"].set_index("row_id").at["1001", "pos"])
+    q2 = quotas.compute(res, cfg, {pos1: {"decision": "Брак"}})
+    assert (q2["rows"][0]["Брак"], q2["rows"][0]["Под вопросом"]) == (1, 0)
+    tpl = quotas.template(res, cfg, cfg["quotas"]["plan"])
+    assert len(tpl) == 3 and any(t["target"] == 3 for t in tpl)
+    plan = quotas.plan_from_frame(pd.DataFrame({"Город": ["г. Ташкент"], "Пол": ["Ж"], "Возраст": ["18-24"], "План": [5]}),
+                                  quotas.dim_labels(cfg))
+    assert plan == [{"keys": {"Город": "Ташкент", "Пол": "Ж", "Возраст": "18-24"}, "target": 5}]

@@ -228,6 +228,8 @@ const PAGES = {
   history: { title: "История интервьюеров по волнам", render: pageHistory },
   admin: { title: "Администрирование", render: pageAdmin },
   review: { title: "Проверка анкет", render: pageReview },
+  quotaSetup: { title: "Квоты выборки", render: pageQuotaSetup },
+  quotas: { title: "Выполнение квот", render: pageQuotas },
   gps: { title: "GPS-контроль", render: pageGps },
   map: { title: "Карта GPS", render: pageMap },
 };
@@ -793,7 +795,7 @@ async function autoRefresh() {
     if (r.refresh.new) {
       toast(`Новых анкет: ${fmt(r.refresh.new)}` + (r.refresh.new_defects ? ` · из них с браком: ${fmt(r.refresh.new_defects)}` : ""), r.refresh.new_defects > 0);
     }
-    if ($("#modal").hidden && !["columns", "checks", "open", "rules", "admin", "gps", "map"].includes(S.page)) go(S.page);
+    if ($("#modal").hidden && !["columns", "checks", "open", "rules", "admin", "gps", "map", "quotaSetup", "review"].includes(S.page)) go(S.page);
   } catch (e) { /* ошибку покажет следующая ручная проверка; вход — через showLogin */ }
 }
 
@@ -1169,6 +1171,106 @@ async function openAnketa(pos) {
     h("p", { class: "muted small", style: "margin-top:0" }, "Жёлтым выделены колонки, которые читала проверка. Значения — ровно как в выгрузке."),
     valuesBox);
   openModal(`Анкета ${d.id}`, body, true);
+}
+
+
+// ── Квоты: настройка ────────────────────────────────────────────────────────
+function quotaLabels(q) {
+  return [...(q.by_city ? ["Город"] : []), ...q.dims.filter((d) => d.label && d.column).map((d) => d.label)];
+}
+
+function pageQuotaSetup(root) {
+  if (!S.state.sheets.length) return root.append(needData());
+  const q = cfg().quotas;
+  q.dims = q.dims || []; q.plan = q.plan || [];
+  const labels = quotaLabels(q);
+
+  const dimsBox = h("div", {});
+  const drawDims = () => dimsBox.replaceChildren(
+    ...q.dims.map((d, i) => h("div", { class: "dim-row" },
+      h("input", { type: "text", value: d.label || "", placeholder: "Название (Пол, Возраст…)", oninput: (e) => { d.label = e.target.value.trim(); saveConfigSoon(); } }),
+      select(S.state.columns, d.column, (v) => { d.column = v; saveConfigSoon(); }, "— колонка анкеты —"),
+      h("input", { type: "text", value: d.bins || "", placeholder: "Интервалы: 18-24, 25-34, 35-44, 45+", oninput: (e) => { d.bins = e.target.value; saveConfigSoon(); } }),
+      h("button", { class: "btn small danger", onclick: () => { q.dims.splice(i, 1); saveConfigSoon(); go("quotaSetup"); } }, "Удалить"))),
+    q.dims.length ? null : h("div", { class: "muted small", style: "padding:8px 0" }, "Дополнительных признаков нет — квота только по городам."));
+  drawDims();
+
+  root.append(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Из чего состоит квота"),
+      h("p", { class: "hint" }, "Ячейка квоты — сочетание признаков, например «Ташкент · Женский · 18-24». Для числовых колонок (возраст) задайте интервалы, иначе берётся значение как есть. Считаются только завершённые интервью.")),
+      h("button", { class: "btn", onclick: () => { q.dims.push({ label: "", column: null, bins: "" }); saveConfigSoon(); go("quotaSetup"); } }, "+ Признак")),
+    h("div", { class: "form-list", style: "margin-bottom:12px" }, formRow("Делить по городам", "Город берётся из колонки, выбранной на странице «Колонки»", toggle(q, "by_city", () => go("quotaSetup")))),
+    h("div", { class: "form-group-title" }, "Дополнительные признаки"), dimsBox));
+
+  const fileInput = h("input", { type: "file", accept: ".xlsx", hidden: true, onchange: async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append("file", f);
+    await guarded(async () => { q.plan = await call("POST", "/api/quotas/parse", fd, true); saveConfigSoon(); toast(`План загружен: ${q.plan.length} ячеек`); go("quotaSetup"); });
+  } });
+  const total = q.plan.reduce((a, p) => a + (Number(p.target) || 0), 0);
+  root.append(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "План"),
+      h("p", { class: "hint" }, labels.length ? `Ячеек: ${q.plan.length} · всего по плану: ${fmt(total)} анкет. Колонки: ${labels.join(" · ")}.` : "Сначала выберите, из чего состоит квота.")),
+      h("div", { class: "row" },
+        h("button", { class: "btn", title: "Все сочетания, которые уже встречаются в анкетах", onclick: async () => {
+          await guarded(async () => { q.plan = await POST("/api/quotas/template"); saveConfigSoon(); toast("Строки плана созданы из данных — впишите цифры"); go("quotaSetup"); });
+        } }, "Строки из данных"),
+        q.by_city && !q.dims.length ? h("button", { class: "btn", onclick: async () => {
+          await guarded(async () => { q.plan = await POST("/api/quotas/from-geo"); saveConfigSoon(); toast("План по городам взят из GPS-плана"); go("quotaSetup"); });
+        } }, "Из GPS-плана") : null,
+        h("button", { class: "btn", onclick: () => fileInput.click() }, "Из Excel…"), fileInput,
+        q.plan.length ? h("button", { class: "btn danger", onclick: () => { if (confirm("Очистить план?")) { q.plan = []; saveConfigSoon(); go("quotaSetup"); } } }, "Очистить") : null)),
+    h("p", { class: "muted small" }, "Excel для плана: колонки с названиями признаков (", labels.join(", ") || "Город", ") и колонка «План»."),
+    q.plan.length ? table([
+      ...labels.map((l) => ({ key: l, label: l, sortVal: (p) => p.keys[l], render: (p) => p.keys[l] ?? "" })),
+      { key: "target", label: "План", num: true, sortVal: (p) => Number(p.target) || 0, render: (p) => h("input", { type: "number", class: "target", min: 0, value: p.target ?? 0,
+        onclick: (e) => e.stopPropagation(), onchange: (e) => { p.target = Math.max(0, Number(e.target.value) || 0); saveConfigSoon(); } }) },
+      { key: "del", label: "", render: (p) => h("button", { class: "btn small ghost", onclick: () => { q.plan.splice(q.plan.indexOf(p), 1); saveConfigSoon(); go("quotaSetup"); } }, "×") },
+    ], q.plan, { height: 520 }) : h("div", { class: "empty" }, "План пуст. Нажмите «Строки из данных» после проверки, или загрузите Excel.")));
+}
+
+// ── Квоты: выполнение ───────────────────────────────────────────────────────
+function pageQuotas(root) {
+  if (!S.result) return noResult(root);
+  const q = S.result.quotas || {};
+  if (!q.enabled) {
+    root.append(h("div", { class: "card" }, h("div", { class: "empty" }, h("b", {}, q.error ? "Квоты настроены с ошибкой" : "Квоты не настроены"),
+      q.error || "Задайте признаки квоты и план на странице «Квоты».",
+      h("div", { style: "margin-top:14px" }, h("button", { class: "btn", onclick: () => go("quotaSetup") }, "Настроить квоты")))));
+    return;
+  }
+  const sm = q.summary;
+  root.append(h("div", { class: "stats" },
+    h("div", { class: "stat" }, h("div", { class: "k" }, "Выполнение плана"), h("div", { class: "v" }, `${sm.pct}%`), h("div", { class: "s" }, `${fmt(sm.ok)} засчитано из ${fmt(sm.plan)}`)),
+    h("div", { class: "stat yellow" }, h("div", { class: "k" }, "Осталось добрать"), h("div", { class: "v" }, fmt(sm.left)), h("div", { class: "s" }, `ячеек выполнено: ${sm.cells_done} из ${sm.cells}`)),
+    h("div", { class: "stat red" }, h("div", { class: "k" }, "Перебор"), h("div", { class: "v" }, fmt(sm.over)), h("div", { class: "s" }, "лишние анкеты сверх плана"))));
+  const bar = (r) => {
+    const t = Math.max(r["План"], 1);
+    return h("div", { class: "quota-bar" }, h("div", { class: "bar" },
+      h("i", { class: "ok", style: `width:${Math.min(100, r["Засчитано"] / t * 100)}%` }),
+      h("i", { class: "pend", style: `width:${Math.max(0, Math.min(100 - r["Засчитано"] / t * 100, r["Под вопросом"] / t * 100))}%` })),
+      h("span", {}, r["%"] != null ? `${r["%"]}%` : "—"));
+  };
+  root.append(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "По ячейкам"),
+      h("p", { class: "hint" }, "Засчитано — принятые руководителем и анкеты без замечаний. Под вопросом — подозрительные без решения и «на перезвон»: если их забракуют, придётся добирать. Зелёная полоса — засчитано, оранжевая — под вопросом.")),
+      h("button", { class: "btn small", onclick: () => exportReport("quotas") }, "Excel")),
+    table([
+      { key: "Статус", label: "", render: (r) => h("span", { class: `dot ${r["Статус"]}`, title: { GREEN: "набрано", YELLOW: "добирать", RED: "перебор" }[r["Статус"]] }),
+        sortVal: (r) => ({ RED: 3, YELLOW: 2, GREEN: 1 })[r["Статус"]] },
+      ...q.labels.map((l) => ({ key: l, label: l })),
+      { key: "План", label: "План", num: true }, { key: "Засчитано", label: "Засчитано", num: true },
+      { key: "Под вопросом", label: "Под вопросом", num: true }, { key: "Брак", label: "Брак", num: true },
+      { key: "Осталось", label: "Осталось", num: true, render: (r) => r["Осталось"] ? h("b", {}, fmt(r["Осталось"])) : "—" },
+      { key: "Перебор", label: "Перебор", num: true, render: (r) => r["Перебор"] ? h("b", { style: "color:var(--red)" }, `+${fmt(r["Перебор"])}`) : "—" },
+      { key: "%", label: "Выполнение", render: bar, sortVal: (r) => r["%"] ?? -1 },
+    ], q.rows, { sortKey: "Осталось", height: 600, rowClass: (r) => r["Статус"] === "RED" ? "row-RED" : "" })));
+  if (q.outside_plan.length) {
+    root.append(h("div", { class: "card" }, h("h2", {}, "Анкеты вне плана"),
+      h("p", { class: "hint" }, "Сочетания признаков, которых нет в плане: опечатка в городе, другой вариант ответа (например «Жен.» вместо «Женский») или респонденты не из целевой группы."),
+      table([...q.labels.map((l) => ({ key: l, label: l })), { key: "total", label: "Анкет", num: true },
+        { key: "ok", label: "Засчитано", num: true }, { key: "brak", label: "Брак", num: true }], q.outside_plan, { search: false, height: 320 })));
+  }
 }
 
 // ── Модальное окно ──────────────────────────────────────────────────────────
