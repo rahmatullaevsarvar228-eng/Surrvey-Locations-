@@ -7,9 +7,14 @@ on:
       - ".github/workflows/build-windows.yml"
   workflow_dispatch:
 
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: qc_app
@@ -49,7 +54,7 @@ jobs:
             $psi.Arguments = "--selftest"
             $psi.UseShellExecute = $false
             $proc = [System.Diagnostics.Process]::Start($psi)
-            $proc.WaitForExit()
+            if (-not $proc.WaitForExit(120000)) { $proc.Kill(); return -1 }   # зависание = провал
             return $proc.ExitCode
           }
           $files = Get-ChildItem dist\AnketaQC -Recurse -File -Include *.dll,*.exe,*.pyd

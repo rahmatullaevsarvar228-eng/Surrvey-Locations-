@@ -84,9 +84,16 @@ def selftest():
     # Загружаем ту же оконную часть, что и при обычном запуске (на Windows это
     # .NET через pythonnet) — именно она падала у файлов из скачанного zip.
     unblock_bundle()
-    import webview  # noqa: F401
-    if sys.platform == "win32":
-        import webview.platforms.winforms  # noqa: F401
+    try:
+        import webview  # noqa: F401
+        if sys.platform == "win32":
+            import webview.platforms.winforms  # noqa: F401
+    except Exception:  # noqa: BLE001
+        # Не даём исключению уйти наружу: exe без консоли показал бы окно
+        # с ошибкой и ждал нажатия — в CI это зависание вместо кода выхода.
+        import traceback
+        traceback.print_exc()
+        sys.exit(2)
     sys.exit(0 if ok else 1)
 
 
