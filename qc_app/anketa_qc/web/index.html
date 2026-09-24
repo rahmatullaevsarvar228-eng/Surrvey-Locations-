@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Контроль качества анкет</title>
+<link rel="stylesheet" href="/web/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 2.5l7.5 3v6c0 4.6-3.2 8.6-7.5 10-4.3-1.4-7.5-5.4-7.5-10v-6z"/><path class="tick" d="M8.3 12.2l2.6 2.6 4.9-5.2"/></svg>
+      </div>
+      <div>
+        <div class="brand-title">Контроль качества</div>
+        <div class="brand-sub">полевых опросов</div>
+      </div>
+    </div>
+
+    <div class="project">
+      <label class="side-label" for="projectSelect">Проект</label>
+      <div class="project-row">
+        <select id="projectSelect"></select>
+        <button class="icon-btn" id="newProjectBtn" title="Новый проект" aria-label="Новый проект">
+          <svg viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <nav id="nav">
+      <div class="nav-group">Настройка</div>
+      <a data-page="data"><i class="ico ico-data"></i>Данные</a>
+      <a data-page="columns"><i class="ico ico-columns"></i>Колонки</a>
+      <a data-page="checks"><i class="ico ico-checks"></i>Пороги проверок</a>
+      <a data-page="open"><i class="ico ico-open"></i>Открытые вопросы</a>
+      <a data-page="rules"><i class="ico ico-rules"></i>Логические правила</a>
+      <div class="nav-group">Результаты</div>
+      <a data-page="overview" class="needs-result"><i class="ico ico-overview"></i>Обзор</a>
+      <a data-page="interviewers" class="needs-result"><i class="ico ico-people"></i>Интервьюеры</a>
+      <a data-page="anketas" class="needs-result"><i class="ico ico-list"></i>Анкеты</a>
+      <a data-page="cities" class="needs-result"><i class="ico ico-city"></i>Города</a>
+      <a data-page="answers" class="needs-result"><i class="ico ico-quote"></i>Ответы</a>
+      <a data-page="repetition" class="needs-result"><i class="ico ico-repeat"></i>Повтор значения</a>
+      <div class="nav-group">Между волнами</div>
+      <a data-page="history"><i class="ico ico-history"></i>История</a>
+    </nav>
+
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <main class="main">
+    <header class="toolbar">
+      <div>
+        <h1 id="pageTitle">Данные</h1>
+        <div class="toolbar-sub" id="pageSub"></div>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn" id="exportBtn" disabled>
+          <svg viewBox="0 0 20 20"><path d="M10 3v9m0 0l-3.5-3.5M10 12l3.5-3.5M4 14.5V16h12v-1.5"/></svg>
+          Отчёт Excel
+        </button>
+        <button class="btn primary" id="runBtn">
+          <svg viewBox="0 0 20 20"><path d="M6.5 4.5v11l9-5.5z"/></svg>
+          Проверить
+        </button>
+      </div>
+    </header>
+    <div class="content" id="content"></div>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<div class="sheet-backdrop" id="modal" hidden>
+  <div class="sheet-panel" role="dialog" aria-modal="true">
+    <div class="sheet-head">
+      <h2 id="modalTitle"></h2>
+      <button class="icon-btn" id="modalClose" aria-label="Закрыть"><svg viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></svg></button>
+    </div>
+    <div class="sheet-body" id="modalBody"></div>
+  </div>
+</div>
+<div class="busy" id="busy" hidden><div class="spinner"></div><div id="busyText">Проверяю анкеты…</div></div>
+
+<script src="/web/app.js"></script>
+</body>
+</html>

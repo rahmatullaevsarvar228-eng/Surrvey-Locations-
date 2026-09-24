@@ -1,0 +1,55 @@
+name: Windows build — AnketaQC
+
+on:
+  push:
+    paths:
+      - "qc_app/**"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: qc_app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pytest
+
+      - name: Tests
+        run: python -m pytest -q tests
+
+      - name: Build exe
+        run: pyinstaller packaging/anketa_qc.spec --noconfirm --distpath dist --workpath build
+
+      - name: Smoke test of built exe
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\AnketaQC\AnketaQC.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = python -c "import anketa_qc; print(anketa_qc.__version__)"
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=$version" packaging\installer.iss
+          Compress-Archive -Path dist\AnketaQC -DestinationPath "dist\AnketaQC-portable-$version.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AnketaQC-windows
+          path: |
+            qc_app/dist/AnketaQC-Setup-*.exe
+            qc_app/dist/AnketaQC-portable-*.zip
