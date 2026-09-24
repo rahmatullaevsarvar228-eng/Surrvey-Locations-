@@ -25,6 +25,10 @@ ROLES = [
          patterns=["телефон", "phone", "telefon"]),
     dict(key="name", label="ФИО респондента", required=False,
          patterns=["как вас зовут", "фио", "имя респондента", "ismingiz", "name"]),
+    dict(key="lat", label="GPS: широта", required=False,
+         patterns=["_latitude", "latitude", "широта", "kenglik"]),
+    dict(key="lon", label="GPS: долгота", required=False,
+         patterns=["_longitude", "longitude", "долгота", "uzunlik"]),
 ]
 ROLE_KEYS = [r["key"] for r in ROLES]
 REQUIRED_ROLES = [r["key"] for r in ROLES if r["required"]]
@@ -77,6 +81,17 @@ DEFAULT_CONFIG = {
         "yellow_pct": 50, "yellow_min_n": 5,
     },
     "status": {"red_pct": 50, "yellow_pct": 20},
+    "geo": {
+        "max_dist_km": 2.0,          # дальше от плановой точки — отмечаем
+        "max_per_point": 20,         # максимум анкет интервьюера в одном месте
+        "min_sep_km": 1.5,           # радиус «одного места» для скоплений
+        "same_point_min": 3,         # столько анкет с одинаковыми координатами — подозрительно
+        "far_severity": "warning",
+        "cluster_severity": "warning",
+        "same_severity": "warning",
+        "no_gps_severity": "warning",
+        "plan": {},                  # {город: {"points": [{lat, lon, street_ru}]}}
+    },
     "remote_sources": [],        # ID таблиц Google Sheets проекта на сервере доступа
     "auto_refresh_min": 15,      # автообновление анкет из таблиц, 0 — выключено
 }

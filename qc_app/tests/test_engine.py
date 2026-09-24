@@ -188,3 +188,44 @@ def test_name_duplicates_only_within_city(cfg):
             make_row(1, "D2", "B", "2025-09-01 11:00", 10, city="Самарканд", name="Азиз Каримов")]
     df = engine.run(pd.DataFrame(rows), cfg)["df"]
     assert not df["issues"].map(bool).any()
+
+
+def test_gps_checks():
+    from anketa_qc import geo
+    plan = {"Ташкент": {"points": [{"lat": 41.3, "lon": 69.24, "street_ru": "м. Чорсу"}]}}
+    cfg = config.default_config()
+    rows = []
+    for i in range(6):   # A: всё в одной точке у метро
+        r = make_row(i, "D1", "A", f"2025-09-01 {9 + i}:00", 10)
+        r["lat"], r["lon"] = 41.3001, 69.2401
+        rows.append(r)
+    far = make_row(10, "D2", "B", "2025-09-01 10:00", 10)
+    far["lat"], far["lon"] = 41.40, 69.40                 # ~17 км от точки
+    nogps = make_row(11, "D2", "B", "2025-09-01 11:00", 10)
+    nogps["lat"], nogps["lon"] = None, None
+    rows += [far, nogps]
+    df_in = pd.DataFrame(rows)
+    cfg["mapping"] = config.suggest_mapping(list(df_in.columns))
+    cfg["mapping"].update(lat="lat", lon="lon")
+    cfg["geo"].update(plan=plan, max_per_point=5)
+    res = engine.run(df_in, cfg)
+    codes = {rid: {c for c, _, _ in xs} for rid, xs in res["df"].set_index("row_id")["issues"].items()}
+    assert "geo_far" in codes["1010"] and "geo_far" not in codes["1000"]
+    assert {"geo_cluster", "geo_same"} <= codes["1000"]
+    assert "no_gps" in codes["1011"]
+    g = res["geo"]
+    assert g["enabled"] and g["with_gps"] == 7 and g["far"] == 1 and g["clusters_over"] == 1
+    # geopoint одной строкой, как в Kobo
+    lat, lon = geo.parse_coords(pd.Series(["41.31 69.24 450 5", "0 0", None]))
+    assert lat.iloc[0] == 41.31 and lon.iloc[0] == 69.24 and lat.iloc[1:].isna().all()
+    assert len(geo.default_plan()) == 14
+
+
+def test_gps_plan_from_excel():
+    from anketa_qc import geo
+    plan = geo.plan_from_frame(pd.DataFrame({"Город": ["г. Бухара", "Бухара", "Нукус"],
+                                             "Широта": [39.77, "39,78", 42.46], "Долгота": [64.44, 64.41, 59.62],
+                                             "Название": ["Ляби-Хауз", None, "Площадь"]}))
+    assert list(plan) == ["Бухара", "Нукус"] and len(plan["Бухара"]["points"]) == 2
+    with pytest.raises(ValueError):
+        geo.plan_from_frame(pd.DataFrame({"x": [1]}))

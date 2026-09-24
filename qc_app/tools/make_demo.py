@@ -2,10 +2,14 @@
 """Генерирует демо-выгрузку в формате Kobo (лист «data» + вспомогательный лист)
 с несколькими «нечестными» интервьюерами — чтобы посмотреть приложение в деле
 без реальных данных. Запуск: python tools/make_demo.py demo.xlsx"""
+import json
 import random
 import sys
+from pathlib import Path
 
 import pandas as pd
+
+PLAN = json.loads((Path(__file__).resolve().parents[1] / "anketa_qc" / "geo_plan_default.json").read_text(encoding="utf-8"))
 
 random.seed(7)
 BRANDS = ["Uzum Bank", "Узум", "uzum", "TBC", "тбс банк", "Kapitalbank", "Капитал", "Payme", "Click",
@@ -28,6 +32,8 @@ def main(out):
             device = f"collect:{random.randrange(10**15, 10**16)}"
             cheater = inter_no in (3, 8)            # конвейер, короткие, один бренд
             lazy = inter_no == 11                   # слабый зондаж
+            plan_pts = PLAN[city.replace("г. ", "")]["points"]
+            home = (plan_pts[0]["lat"] + 0.09, plan_pts[0]["lon"] + 0.07)   # «дом» интервьюера, ~12 км от точек
             day = pd.Timestamp("2025-09-15 09:00")
             t = day + pd.Timedelta(minutes=random.randint(0, 40))
             for k in range(random.randint(18, 34)):
@@ -74,6 +80,18 @@ def main(out):
                 row["Доход (1-3)"] = income
                 row["Скажите пожалуйста как вас зовут?"] = name
                 row["Номер телефона респондента"] = phone if random.random() > 0.05 else None
+                if inter_no == 8:                     # сидит дома: одна и та же точка
+                    lat, lon = home
+                elif inter_no == 3:                   # всё в одном месте — скопление
+                    p = plan_pts[0]
+                    lat, lon = p["lat"] + random.uniform(-0.002, 0.002), p["lon"] + random.uniform(-0.002, 0.002)
+                else:                                 # честно ходит по плановым точкам
+                    p = plan_pts[k % len(plan_pts)]
+                    lat, lon = p["lat"] + random.uniform(-0.006, 0.006), p["lon"] + random.uniform(-0.006, 0.006)
+                if random.random() < 0.03:
+                    lat = lon = None                  # GPS не записался
+                row["_Координаты_latitude"] = lat
+                row["_Координаты_longitude"] = lon
                 row["_id"] = rid
                 rows.append(row)
     df = pd.DataFrame(rows)

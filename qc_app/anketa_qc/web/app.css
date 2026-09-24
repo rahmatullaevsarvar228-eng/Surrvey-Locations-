@@ -348,3 +348,12 @@ body.is-admin .nav-group.admin-only { display: block; }
 .live { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); }
 .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #34C759; box-shadow: 0 0 0 3px rgba(52,199,89,.2); }
 .live.off::before { background: var(--ink-3); box-shadow: none; }
+
+.ico-pin { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8'%3E%3Cpath d='M3.5 6.5l5.5-2 6 2 5.5-2v13l-5.5 2-6-2-5.5 2z' stroke-linejoin='round'/%3E%3Cpath d='M9 4.5v13M15 6.5v13'/%3E%3C/svg%3E"); }
+.map { height: 560px; border-radius: 12px; border: 1px solid var(--line); overflow: hidden; background: var(--fill-2); }
+.map-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); margin-top: 10px; }
+.map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.map-legend i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.leaflet-container { font: inherit; }
+/* общее правило для иконок (svg 16×16) не должно трогать слой карты */
+.leaflet-pane svg { width: auto; height: auto; }

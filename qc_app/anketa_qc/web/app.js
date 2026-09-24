@@ -203,6 +203,8 @@ const PAGES = {
   repetition: { title: "Повтор значения у интервьюера", render: pageRepetition },
   history: { title: "История интервьюеров по волнам", render: pageHistory },
   admin: { title: "Администрирование", render: pageAdmin },
+  gps: { title: "GPS-контроль", render: pageGps },
+  map: { title: "Карта GPS", render: pageMap },
 };
 
 function go(page) {
@@ -309,7 +311,8 @@ function pageColumns(root) {
   const rows = S.state.roles.map((role) => formRow(
     h("span", {}, role.label, role.required ? h("span", { class: "req" }, "*") : null),
     { phone: "Для поиска дубликатов и контроля пропусков телефона", name: "Для поиска дубликатов респондентов",
-      id: "Если не выбрано — будет номер строки в Excel", device: "IMEI / идентификатор устройства" }[role.key] || null,
+      id: "Если не выбрано — будет номер строки в Excel", device: "IMEI / идентификатор устройства",
+      lat: "Для GPS-контроля. Если координаты в одной колонке «41.31 69.24 …» — выберите её здесь", lon: "Можно оставить пустым, если координаты в одной колонке" }[role.key] || null,
     select(S.state.columns, c.mapping[role.key], (v) => { c.mapping[role.key] = v; saveConfigSoon(); }, "— не выбрано —")));
   root.append(h("div", { class: "card" }, h("h2", {}, "Какая колонка за что отвечает"),
     h("p", { class: "hint" }, "Частые названия колонок подставлены автоматически — проверьте и при необходимости выберите вручную. * — обязательные поля."),
@@ -752,7 +755,7 @@ async function autoRefresh() {
     if (r.refresh.new) {
       toast(`Новых анкет: ${fmt(r.refresh.new)}` + (r.refresh.new_defects ? ` · из них с браком: ${fmt(r.refresh.new_defects)}` : ""), r.refresh.new_defects > 0);
     }
-    if ($("#modal").hidden && !["columns", "checks", "open", "rules", "admin"].includes(S.page)) go(S.page);
+    if ($("#modal").hidden && !["columns", "checks", "open", "rules", "admin", "gps", "map"].includes(S.page)) go(S.page);
   } catch (e) { /* ошибку покажет следующая ручная проверка; вход — через showLogin */ }
 }
 
@@ -866,6 +869,134 @@ async function pageAdmin(root) {
         fetch: "загрузка анкет", add_source: "подключил таблицу", delete_source: "отключил таблицу", create_user: "создал сотрудника",
         update_user: "изменил сотрудника", reset_password: "сбросил пароль", delete_user: "удалил сотрудника", change_password: "сменил пароль" })[x.action] || x.action },
       { key: "detail", label: "Подробности", wrap: true }], log, { height: 420 })));
+}
+
+// ── GPS: настройки ──────────────────────────────────────────────────────────
+function pageGps(root) {
+  const c = cfg(), g = c.geo;
+  const sev = (key) => select(SEVERITY_OPTIONS, g[key], (v) => { g[key] = v; saveConfigSoon(); });
+  const plan = g.plan || {};
+  const cities = Object.keys(plan);
+  const nPoints = cities.reduce((a, k) => a + ((plan[k] || {}).points || []).length, 0);
+  const mapped = c.mapping.lat;
+
+  if (!mapped) {
+    root.append(h("div", { class: "notice warn" }, h("div", {}, "Не выбрана колонка с координатами. На странице ",
+      h("a", { href: "#", onclick: (e) => { e.preventDefault(); go("columns"); } }, "«Колонки»"),
+      " укажите «GPS: широта» и «GPS: долгота» (в Kobo обычно …_latitude и …_longitude). Если координаты в одной колонке «41.31 69.24 …», выберите её как широту, а долготу оставьте пустой.")));
+  }
+
+  root.append(h("div", { class: "card" }, h("h2", {}, "Что проверяется"),
+    h("p", { class: "hint" }, "GPS показывает, где интервьюер был в момент анкеты. Проверки срабатывают, когда в выгрузке есть координаты."),
+    h("div", { class: "form-list" },
+      formRow("Далеко от точки опроса", "Анкета дальше заданного расстояния от ближайшей плановой точки своего города",
+        [number(g, "max_dist_km", 0.1, 100, 0.1), h("span", { class: "unit" }, "км"), sev("far_severity")]),
+      formRow("Скопление анкет", "Сколько анкет интервьюера допустимо в одном месте (радиус ниже)",
+        [number(g, "max_per_point", 1, 1000), h("span", { class: "unit" }, "анкет"), sev("cluster_severity")]),
+      formRow("Радиус «одного места»", "Анкеты ближе этого считаются одной точкой",
+        [number(g, "min_sep_km", 0.05, 20, 0.05), h("span", { class: "unit" }, "км")]),
+      formRow("Одинаковые координаты", "Столько анкет интервьюера с координатами, совпадающими до метра, — похоже на копирование или подмену GPS",
+        [number(g, "same_point_min", 2, 100), h("span", { class: "unit" }, "анкет"), sev("same_severity")]),
+      formRow("Нет координат", "GPS не записался в анкете", sev("no_gps_severity")))));
+
+  const fileInput = h("input", { type: "file", accept: ".xlsx", hidden: true, onchange: async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append("file", f);
+    await guarded(async () => { g.plan = await call("POST", "/api/geo/plan/parse", fd, true); saveConfigSoon(); toast("План точек загружен"); go("gps"); });
+  } });
+  root.append(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "План точек опроса"),
+      h("p", { class: "hint" }, nPoints ? `${cities.length} городов, ${nPoints} точек. Анкеты из городов, которых нет в плане, по расстоянию не проверяются (скопления и одинаковые координаты — проверяются).`
+        : "План не задан — проверяются только скопления, одинаковые координаты и отсутствие GPS.")),
+      h("div", { class: "row" },
+        h("button", { class: "btn", onclick: async () => { await guarded(async () => { g.plan = await GET("/api/geo/default-plan"); saveConfigSoon(); toast("Встроенный план загружен"); go("gps"); }); } }, "Встроенный план (14 городов)"),
+        h("button", { class: "btn", onclick: () => fileInput.click() }, "Из Excel…"), fileInput,
+        nPoints ? h("button", { class: "btn danger", onclick: () => { if (confirm("Очистить план точек?")) { g.plan = {}; saveConfigSoon(); go("gps"); } } }, "Очистить") : null)),
+    h("p", { class: "muted small" }, "Excel для плана: колонки «Город», «Широта», «Долгота» и необязательная «Название»."),
+    nPoints ? table([{ key: "city", label: "Город" }, { key: "n", label: "Точек", num: true },
+      { key: "names", label: "Точки", wrap: true }],
+      cities.map((k) => ({ city: k, n: plan[k].points.length, names: plan[k].points.map((p, i) => p.street_ru || `Точка ${i + 1}`).join(" · ") })),
+      { search: false, height: 360 }) : null));
+}
+
+// ── GPS: карта ──────────────────────────────────────────────────────────────
+let leafletMap = null;
+function pageMap(root) {
+  if (!S.result) return noResult(root);
+  const g = S.result.geo || {};
+  if (!g.enabled) {
+    root.append(h("div", { class: "card" }, h("div", { class: "empty" }, h("b", {}, "GPS-контроль не включён"),
+      "Выберите колонки с координатами на странице «Колонки» и запустите проверку.",
+      h("div", { style: "margin-top:14px" }, h("button", { class: "btn", onclick: () => go("gps") }, "Настроить GPS")))));
+    return;
+  }
+  root.append(h("div", { class: "stats" },
+    h("div", { class: "stat" }, h("div", { class: "k" }, "Анкет с GPS"), h("div", { class: "v" }, fmt(g.with_gps)), h("div", { class: "s" }, g.without_gps ? `без GPS: ${fmt(g.without_gps)}` : "у всех есть координаты")),
+    h("div", { class: "stat red" }, h("div", { class: "k" }, "Далеко от точки"), h("div", { class: "v" }, fmt(g.far)), h("div", { class: "s" }, `дальше ${g.max_dist_km} км`)),
+    h("div", { class: "stat yellow" }, h("div", { class: "k" }, "Скоплений сверх лимита"), h("div", { class: "v" }, fmt(g.clusters_over)), h("div", { class: "s" }, `больше ${g.max_per_point} анкет в одном месте`)),
+    h("div", { class: "stat red" }, h("div", { class: "k" }, "Одинаковые координаты"), h("div", { class: "v" }, fmt(g.same)), h("div", { class: "s" }, "анкет — копирование/подмена GPS"))));
+  if (g.unmatched_cities.length) root.append(h("div", { class: "notice warn" }, `Нет в плане точек: ${g.unmatched_cities.join(", ")} — расстояние для этих городов не проверяется.`));
+
+  const cities = [...new Set(g.points.map((p) => p.city))].sort((a, b) => String(a).localeCompare(String(b), "ru"));
+  const inters = (city) => [...new Set(g.points.filter((p) => p.city === city).map((p) => p.inter))].sort();
+  S.mapCity = cities.includes(S.mapCity) ? S.mapCity : cities[0];
+  S.mapInter = S.mapInter || "";
+  const box = h("div", { class: "map" });
+  const controls = h("div", { class: "row", style: "margin-bottom:12px" },
+    select(cities, S.mapCity, (v) => { S.mapCity = v; S.mapInter = ""; go("map"); }),
+    select(inters(S.mapCity), S.mapInter, (v) => { S.mapInter = v || ""; draw(); }, "Все интервьюеры"),
+    h("span", { class: "spacer" }),
+    h("span", { class: "muted small" }, "Нажмите на точку — увидите анкету"));
+  root.append(h("div", { class: "card" }, controls, box,
+    h("div", { class: "map-legend" },
+      h("span", {}, h("i", { style: "background:#0A84FF" }), "плановая точка и допустимый радиус"),
+      h("span", {}, h("i", { style: "background:#34C759" }), "анкета в норме"),
+      h("span", {}, h("i", { style: "background:#FF9F0A" }), "в скоплении"),
+      h("span", {}, h("i", { style: "background:#E0352B" }), "далеко от точки / одинаковые координаты"))));
+
+  if (leafletMap) { leafletMap.remove(); leafletMap = null; }
+  if (!window.L) { box.replaceChildren(h("div", { class: "empty" }, "Карта не загрузилась.")); return; }
+  leafletMap = L.map(box, { zoomControl: true });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(leafletMap);
+  const layer = L.layerGroup().addTo(leafletMap);
+
+  function draw() {
+    layer.clearLayers();
+    const bounds = [];
+    const planPts = ((g.plan[S.mapCity] || Object.entries(g.plan).find(([k]) => k.toLowerCase() === String(S.mapCity).toLowerCase())?.[1] || {}).points) || [];
+    planPts.forEach((p, i) => {
+      L.circle([p.lat, p.lon], { radius: g.max_dist_km * 1000, color: "#0A84FF", weight: 1, fillOpacity: 0.04 }).addTo(layer);
+      L.circleMarker([p.lat, p.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#0A84FF", fillOpacity: 1 })
+        .bindTooltip(p.street_ru || `Точка ${i + 1}`).addTo(layer);
+      bounds.push([p.lat, p.lon]);
+    });
+    g.points.filter((p) => p.city === S.mapCity && (!S.mapInter || p.inter === S.mapInter)).forEach((p) => {
+      const bad = p.far || p.same;
+      const color = bad ? "#E0352B" : p.cluster ? "#FF9F0A" : "#34C759";
+      const why = [p.far && `далеко: ${p.dist} км от «${p.point}»`, p.cluster && "в скоплении", p.same && "одинаковые координаты"].filter(Boolean).join(", ");
+      L.circleMarker([p.lat, p.lon], { radius: 5, color: "#fff", weight: 1, fillColor: color, fillOpacity: 0.9 })
+        .bindPopup(`<b>${p.inter}</b> · анкета ${p.id}<br>${p.dist != null ? `до точки ${p.dist} км` : "город не в плане"}${why ? `<br><span style="color:${color}">${why}</span>` : ""}`)
+        .addTo(layer);
+      bounds.push([p.lat, p.lon]);
+    });
+    if (bounds.length) leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+    else leafletMap.setView([41.3, 69.24], 11);
+  }
+  draw();
+  setTimeout(() => { if (leafletMap) { leafletMap.invalidateSize(); draw(); } }, 60);
+
+  root.append(h("div", { class: "card" }, h("h2", {}, "Скопления анкет"),
+    h("p", { class: "hint" }, `Где каждый интервьюер реально стоял: анкеты ближе ${g.min_sep_km} км объединены в одну точку. Больше ${g.max_per_point} анкет в одном месте — подозрительно.`),
+    table([{ key: "Статус", label: "Статус", render: (r) => pill(r["Статус"]) },
+      { key: "Город", label: "Город" }, { key: "Интервьюер", label: "Интервьюер" }, { key: "Точка", label: "Точка" },
+      { key: "Анкет", label: "Анкет", num: true }, { key: "Лимит", label: "Лимит", num: true }],
+      g.clusters, { sortKey: "Анкет", rowClass: (r) => `row-${r["Статус"]}`, height: 420 })));
+  const flagged = g.points.filter((p) => p.far || p.same);
+  root.append(h("div", { class: "card" }, h("h2", {}, "Анкеты не на месте"),
+    table([{ key: "id", label: "ID анкеты" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
+      { key: "dist", label: "До точки, км", num: true, digits: 2 }, { key: "point", label: "Ближайшая точка" },
+      { key: "why", label: "Причина", render: (p) => [p.far && "далеко от точки", p.same && "одинаковые координаты"].filter(Boolean).join(", ") }],
+      flagged, { sortKey: "dist", rowClass: () => "row-RED", height: 420, empty: "Все анкеты у плановых точек" })));
 }
 
 // ── Модальное окно ──────────────────────────────────────────────────────────

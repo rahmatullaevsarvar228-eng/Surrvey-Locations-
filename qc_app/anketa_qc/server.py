@@ -148,6 +148,7 @@ def result_payload(sess):
         "answers": _records(r["answers"]["all"]),
         "rule_errors": r["rule_errors"],
         "legend": engine.status_legend(cfg),
+        "geo": r.get("geo") or {"enabled": False},
     }
 
 
@@ -369,6 +370,26 @@ def create_app(data_dir, client_factory=RemoteClient):
         sess.result = None
         sess.save_config()
         return jsonify(state_payload())
+
+    @app.get("/api/geo/default-plan")
+    def geo_default_plan():
+        from . import geo
+        return jsonify(geo.default_plan())
+
+    @app.post("/api/geo/plan/parse")
+    def geo_plan_parse():
+        from . import geo
+        f = request.files.get("file")
+        if f is None:
+            return fail("Файл не получен")
+        sheets = sources.read_excel_bytes(f.read())
+        errors = []
+        for df in sheets.values():
+            try:
+                return jsonify(geo.plan_from_frame(df))
+            except ValueError as e:
+                errors.append(str(e))
+        return fail(errors[0] if errors else "Пустой файл")
 
     @app.get("/api/preview")
     def preview():

@@ -101,6 +101,22 @@ def full_report(result, legend):
         if result["repetition"]["enabled"] and result["repetition"]["rows"]:
             write_sheet(writer, "Повтор значения", pd.DataFrame(result["repetition"]["rows"]),
                         status_col="Статус")
+        g = result.get("geo") or {}
+        if g.get("enabled") and g.get("points"):
+            pts = pd.DataFrame(g["points"])
+            gps = pd.DataFrame({
+                "ID анкеты": pts["id"], "Город": pts["city"], "Интервьюер": pts["inter"],
+                "Широта": pts["lat"], "Долгота": pts["lon"], "Ближайшая точка": pts["point"],
+                "Расстояние, км": pts["dist"],
+                "Далеко от точки": pts["far"].map({True: "Да", False: ""}),
+                "В скоплении": pts["cluster"].map({True: "Да", False: ""}),
+                "Одинаковые координаты": pts["same"].map({True: "Да", False: ""}),
+            })
+            status = ["RED" if f or c or s else "GREEN" for f, c, s in zip(pts["far"], pts["cluster"], pts["same"])]
+            write_sheet(writer, "GPS", gps, row_status=status)
+            if g.get("clusters"):
+                cl = pd.DataFrame(g["clusters"]).rename(columns={"lat": "Широта", "lon": "Долгота"})
+                write_sheet(writer, "GPS скопления", cl, status_col="Статус")
         all_rows = defects_table(df, only_defects=False)
         status = ["RED" if d == "Да" else ("YELLOW" if w else "GREEN")
                   for d, w in zip(all_rows["Брак?"], all_rows["Предупреждения"])]

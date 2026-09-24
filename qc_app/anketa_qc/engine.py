@@ -40,6 +40,10 @@ ISSUE_LABELS = {
     "dup_name": "Дубликат респондента: то же ФИО",
     "probe_depth": "Мало ответов в открытом вопросе (слабый зондаж «А ещё?»)",
     "probe_low_avg": "У интервьюера мало ответов в открытых вопросах относительно медианы волны",
+    "no_gps": "Нет GPS-координат",
+    "geo_far": "Анкета далеко от плановой точки опроса",
+    "geo_cluster": "Скопление: слишком много анкет интервьюера в одном месте",
+    "geo_same": "Одинаковые GPS-координаты в разных анкетах интервьюера",
 }
 
 # Система раннего предупреждения (из main.py) — одна шкала для всех проверок.
@@ -138,6 +142,11 @@ def prepare(raw, cfg):
     df["inter"] = raw[m["inter"]].map(clean_str)
     df["phone"] = raw[m["phone"]].map(clean_str) if m.get("phone") else None
     df["resp_name"] = raw[m["name"]].map(clean_str) if m.get("name") else None
+    if m.get("lat"):
+        from .geo import parse_coords
+        df["lat"], df["lon"] = parse_coords(raw[m["lat"]], raw[m["lon"]] if m.get("lon") else None)
+    else:
+        df["lat"] = df["lon"] = np.nan
 
     done_cols = [c for c in cfg.get("completed_cols") or [] if c in raw.columns]
     if done_cols:
@@ -432,6 +441,12 @@ def run(raw_input, cfg):
                 lambda i: f"у интервьюера в среднем {low[df.at[i, 'inter']]:.1f} ответов в открытых вопросах "
                           f"(< {probing.get('low_avg_pct', 70)}% медианы волны {wave_median:.1f})")
 
+    # --- GPS-контроль (если выбрана колонка с координатами) -----------------
+    geo_result = {"enabled": False}
+    if cfg["mapping"].get("lat"):
+        from . import geo
+        geo_result = geo.check(df, cfg, add)
+
     # --- Пользовательские правила -------------------------------------------
     rule_errors = []
     raw_sorted = raw.loc[df["pos"]].reset_index(drop=True)
@@ -477,6 +492,7 @@ def run(raw_input, cfg):
         "blocks": [b.get("label") or f"Блок {i + 1}" for i, b in enumerate(blocks)],
         "interviewers": interviewers,
         "repetition": repetition,
+        "geo": geo_result,
         # Общие для всей выгрузки данные — отдельно от построчной таблицы
         # (урок из main.py: копия на каждой строке роняла приложение по памяти).
         "answers": answers,

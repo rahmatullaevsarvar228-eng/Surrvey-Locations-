@@ -282,3 +282,28 @@ def test_access_server_script():
     harness = Path(__file__).resolve().parent / "gas_harness.js"
     res = subprocess.run([node, str(harness)], capture_output=True, text=True, encoding="utf-8")
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_gps_through_api(tmp_path, demo_bytes):
+    client = create_app(tmp_path, client_factory=FakeClient).test_client()
+    login(client)
+    state = client.post("/api/source/file", data={"file": (io.BytesIO(demo_bytes), "demo.xlsx")},
+                        content_type="multipart/form-data").get_json()
+    assert state["suggested"]["lat"] == "_Координаты_latitude"
+    cfg = state["config"]
+    cfg["mapping"] = state["suggested"]
+    cfg["geo"]["plan"] = client.get("/api/geo/default-plan").get_json()
+    r = client.post("/api/run", json={"config": cfg}).get_json()
+    g = r["geo"]
+    assert g["enabled"] and g["far"] > 0 and g["clusters_over"] > 0 and g["same"] > 0
+    flagged = {p["inter"] for p in g["points"] if p["far"]}
+    assert "Inter 08" in flagged                     # «сидит дома»
+    assert any(c["Интервьюер"] == "Inter 03" and c["Статус"] == "RED" for c in g["clusters"])
+    wb = openpyxl.load_workbook(io.BytesIO(client.get("/api/export/full").data))
+    assert {"GPS", "GPS скопления"} <= set(wb.sheetnames)
+    # план из Excel
+    buf = io.BytesIO()
+    pd.DataFrame({"Город": ["Бухара"], "Широта": [39.77], "Долгота": [64.44]}).to_excel(buf, index=False)
+    plan = client.post("/api/geo/plan/parse", data={"file": (io.BytesIO(buf.getvalue()), "plan.xlsx")},
+                       content_type="multipart/form-data").get_json()
+    assert plan["Бухара"]["points"][0]["lat"] == 39.77
