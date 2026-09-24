@@ -7,7 +7,8 @@ ROOT = Path(SPECPATH).parent
 a = Analysis(
     [str(ROOT / "run_app.py")],
     pathex=[str(ROOT)],
-    datas=[(str(ROOT / "anketa_qc" / "web"), "anketa_qc/web")],
+    datas=[(str(ROOT / "anketa_qc" / "web"), "anketa_qc/web"),
+           (str(ROOT / "anketa_qc" / "geo_plan_default.json"), "anketa_qc")],
     hiddenimports=["openpyxl"],
     excludes=["tkinter", "matplotlib", "IPython", "streamlit", "pytest"],
     noarchive=False,

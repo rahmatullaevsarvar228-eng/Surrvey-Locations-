@@ -76,6 +76,9 @@ def selftest():
     client = app.test_client()
     ok = client.get("/").status_code == 200 and client.get("/web/app.js").status_code == 200
     ok = ok and client.get("/api/auth").status_code == 200
+    ok = ok and client.get("/web/vendor/leaflet/leaflet.js").status_code == 200
+    from . import geo
+    ok = ok and len(geo.default_plan()) > 0
     # Загружаем ту же оконную часть, что и при обычном запуске (на Windows это
     # .NET через pythonnet) — именно она падала у файлов из скачанного zip.
     unblock_bundle()
