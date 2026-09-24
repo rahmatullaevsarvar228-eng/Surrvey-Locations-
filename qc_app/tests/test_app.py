@@ -393,3 +393,9 @@ def test_client_report(tmp_path, demo_bytes):
     assert {"Сводка", "Причины брака", "Интервьюеры", "Чистая база"} <= set(wb.sheetnames)
     summary = {row[0]: row[1] for row in wb["Сводка"].iter_rows(min_row=4, values_only=True) if row[0]}
     assert summary["Всего анкет"] == len(r["anketas"])
+
+
+def test_rejects_foreign_host(tmp_path):
+    client = create_app(tmp_path, client_factory=FakeClient).test_client()
+    assert client.get("/api/auth", headers={"Host": "evil.example:8765"}).status_code == 403
+    assert client.get("/api/auth", headers={"Host": "127.0.0.1:51234"}).status_code == 200

@@ -197,10 +197,18 @@ class AnswerFilter:
     def __init__(self, invalid_exact, invalid_substr):
         self.exact = {norm_text(x) for x in invalid_exact if str(x).strip()}
         self.substr = tuple(norm_text(x) for x in invalid_substr if str(x).strip())
+        self._cache = {}
 
     def is_valid(self, v):
         if v is None or (isinstance(v, float) and np.isnan(v)):
             return False
+        key = str(v)
+        cached = self._cache.get(key)
+        if cached is None:
+            cached = self._cache[key] = self._check(v)
+        return cached
+
+    def _check(self, v):
         s = norm_text(v)
         if s == "" or s in self.exact:
             return False
@@ -230,6 +238,7 @@ class Canonicalizer:
             self.substr.append((norm_text(name), name))
         # длинные варианты раньше коротких: «uzum bank» точнее, чем «uzum»
         self.substr.sort(key=lambda x: -len(x[0]))
+        self._cache = {}
 
     def __bool__(self):
         return bool(self.exact)
@@ -244,7 +253,10 @@ class Canonicalizer:
         return None
 
     def canonical(self, answer):
-        return self.match(answer) or str(answer).strip()
+        key = str(answer)
+        if key not in self._cache:
+            self._cache[key] = self.match(answer) or key.strip()
+        return self._cache[key]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -566,19 +578,21 @@ def analyze_answers(df, raw, cfg, answer_filter, blocks):
     audit_cols = list(dict.fromkeys([c for b in blocks for c in b["columns"] if c in raw.columns] + rep_cols))
 
     # df отсортирован — достаём атрибуты анкеты по позиции в raw
-    by_pos = df.set_index("pos")[["row_id", "city", "inter"]]
+    # Обычный словарь вместо .loc на каждую ячейку: на 3000 анкет × 40 колонок
+    # .loc занимал больше 80% времени всей проверки.
+    by_pos = {int(p): (rid, c or "—", i or "—")
+              for p, rid, c, i in zip(df["pos"], df["row_id"], df["city"], df["inter"])}
     index = defaultdict(list)
     counter = Counter()
     for col in audit_cols:
+        question = block_of.get(col, col)
         for pos, v in raw[col].items():
             s = clean_str(v)
-            if s is None or pos not in by_pos.index:
+            r = by_pos.get(pos)
+            if s is None or r is None:
                 continue
             counter[s] += 1
-            r = by_pos.loc[pos]
-            index[s].append({"ID анкеты": r["row_id"], "Город": r["city"] or "—",
-                             "Интервьюер": r["inter"] or "—",
-                             "Вопрос": block_of.get(col, col)})
+            index[s].append({"ID анкеты": r[0], "Город": r[1], "Интервьюер": r[2], "Вопрос": question})
 
     all_rows = []
     for ans, cnt in counter.most_common():
@@ -598,11 +612,11 @@ def analyze_answers(df, raw, cfg, answer_filter, blocks):
         per_inter = defaultdict(lambda: {"city": Counter(), "answers": Counter(), "total": 0})
         for col in rep_cols:
             for pos, v in raw[col].items():
-                if pos not in by_pos.index or not answer_filter.is_valid(v):
+                r = by_pos.get(pos)
+                if r is None or not answer_filter.is_valid(v):
                     continue
-                r = by_pos.loc[pos]
-                d = per_inter[r["inter"] or "—"]
-                d["city"][r["city"] or "—"] += 1
+                d = per_inter[r[2]]
+                d["city"][r[1]] += 1
                 d["answers"][canon.canonical(v)] += 1
                 d["total"] += 1
         for inter, d in per_inter.items():

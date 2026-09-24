@@ -256,6 +256,15 @@ def create_app(data_dir, client_factory=RemoteClient):
         return fail(str(e))
 
     @app.before_request
+    def local_only():
+        """Только запросы к самому компьютеру (127.0.0.1 / localhost): защита
+        от DNS-rebinding — чужой сайт в браузере не сможет обратиться к API."""
+        host = (request.host or "").rsplit(":", 1)[0].strip("[]").lower()
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            return jsonify({"error": "Доступ только с этого компьютера"}), 403
+        return None
+
+    @app.before_request
     def require_login():
         if request.path.startswith("/api/") and request.path not in OPEN_ENDPOINTS and sess.user is None:
             return jsonify({"error": "Нужно войти", "auth": True}), 401
