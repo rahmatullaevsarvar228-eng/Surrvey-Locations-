@@ -35,8 +35,9 @@ class Book {
   getSpreadsheetTimeZone() { return "Asia/Tashkent"; }
 }
 
-function makeEnv() {
+function makeEnv(standalone = false) {
   const registry = new Book();
+  const created = [];
   const external = {};
   const props = {};
   const cache = {};
@@ -49,7 +50,9 @@ function makeEnv() {
   };
   const ctx = {
     SpreadsheetApp: {
-      getActiveSpreadsheet: () => registry,
+      getActiveSpreadsheet: () => (standalone ? null : registry),
+      openById: (id) => { if (id !== "REG") throw new Error("нет"); return registry; },
+      create: (name) => { created.push(name); return Object.assign(registry, { getId: () => "REG", getUrl: () => "https://docs.google.com/spreadsheets/d/REG" }); },
       openByUrl: (url) => { const id = (url.match(/\/d\/([^/]+)/) || [])[1]; if (!external[id]) throw new Error("нет доступа"); return external[id]; },
     },
     Utilities: {
@@ -72,7 +75,7 @@ function makeEnv() {
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "server", "Code.gs"), "utf8"), ctx);
   const call = (body) => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(body) } }).text);
-  return { ctx, registry, external, logs, call, cache };
+  return { ctx, registry, external, logs, call, cache, created };
 }
 
 module.exports = { makeEnv, Book, Sheet };
@@ -180,5 +183,13 @@ assert.ok(call({ action: "delete_source", token: b.token, id: s2.id }).ok);
 assert.strictEqual(call({ action: "sources", token: T }).sources.length, 1);
 assert.ok(call({ action: "log", token: T, limit: 5 }).log.length === 5);
 assert.match(call({ action: "nope", token: T }).error, /Неизвестное/);
+
+// проект Apps Script, созданный отдельно от таблицы: реестр создаётся один раз
+const solo = makeEnv(true);
+solo.ctx.setup();
+solo.ctx.setup();
+assert.deepStrictEqual(solo.created, ["AnketaQC — сервер"]);
+const soloPass = solo.logs.join("\n").match(/Пароль: (\S+)/)[1];
+assert.ok(solo.call({ action: "login", login: "admin", password: soloPass }).token);
 
 console.log("gas_harness: OK");

@@ -345,8 +345,23 @@ function readLog_(limit) {
 }
 
 // ── Таблицы реестра ────────────────────────────────────────────────────────
+/** Таблица-реестр. Если скрипт создан из таблицы (Расширения → Apps Script) —
+ *  это она. Если проект создан отдельно — setup() сам создаёт таблицу
+ *  «AnketaQC — сервер» в вашем Google Диске и запоминает её. */
+function registry_() {
+  var active = SpreadsheetApp.getActiveSpreadsheet();
+  if (active) return active;
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('REGISTRY_ID');
+  if (id) return SpreadsheetApp.openById(id);
+  var book = SpreadsheetApp.create('AnketaQC — сервер');
+  props.setProperty('REGISTRY_ID', book.getId());
+  Logger.log('Создана таблица-реестр: ' + book.getUrl());
+  return book;
+}
+
 function sheet_(name, header) {
-  var book = SpreadsheetApp.getActiveSpreadsheet();
+  var book = registry_();
   var sh = book.getSheetByName(name);
   if (!sh) {
     sh = book.insertSheet(name);
