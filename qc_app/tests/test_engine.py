@@ -285,3 +285,11 @@ def test_gps_point_radius_quota_and_jump():
     market = next(p for p in res["geo"]["point_stats"] if p["Точка"] == "Рынок")
     assert (market["Анкет"], market["Квота"], market["Статус"]) == (2, 1, "RED")
     assert res["geo"]["jumps"] == 1
+
+
+def test_risk_score():
+    assert engine.risk_score([]) == 0
+    assert engine.risk_score([("conveyor", "defect", "")]) == 70
+    # два средних сигнала складываются: 1 − 0.6·0.5 = 0.7
+    assert engine.risk_score([("start_gap", "defect", ""), ("too_short", "defect", "")]) == 70
+    assert engine.risk_score([("rule:X", "warning", "")]) == 25

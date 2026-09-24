@@ -77,6 +77,7 @@ def defects_table(df, only_defects=True):
         "Финиш": rows["end"].dt.strftime("%d.%m.%Y %H:%M"),
         "Длительность, мин": rows["duration_min"].round(1),
         "Брак?": rows["is_defect"].map({True: "Да", False: "Нет"}),
+        "Риск, 0–100": rows["risk"],
         "Причина брака": rows["reason_text"], "Предупреждения": rows["warning_text"],
     })
     return out.sort_values(["Город", "Интервьюер"], key=lambda s: s.astype(str)).reset_index(drop=True)
@@ -122,6 +123,46 @@ def full_report(result, legend):
                   for d, w in zip(all_rows["Брак?"], all_rows["Предупреждения"])]
         write_sheet(writer, "Все анкеты", all_rows, row_status=status)
 
+    return _to_bytes(build)
+
+
+def client_report(result, clean, todo, quota, project, source, decisions_summary):
+    """Отчёт для заказчика: сводка по волне, причины брака, квоты,
+    интервьюеры и чистая база — одним файлом."""
+    from datetime import datetime
+    from . import engine
+    df = result["df"]
+    n, n_def = len(df), int(df["is_defect"].sum())
+    period = engine.data_period(df) or "—"
+    summary = [
+        ("Проект", project), ("Источник данных", source or "—"), ("Период анкет", period),
+        ("Отчёт сформирован", datetime.now().strftime("%d.%m.%Y %H:%M")),
+        ("Всего анкет", n), ("Засчитано (чистая база)", len(clean)),
+        ("Брак по решению руководителя", decisions_summary.get("Брак", 0)),
+        ("Принято после проверки", decisions_summary.get("Принять", 0)),
+        ("На перезвоне", decisions_summary.get("На перезвон", 0)),
+        ("Подозрительные без решения", len(todo)),
+        ("Отмечено системой как брак", f"{n_def} ({n_def / max(n, 1) * 100:.1f}%)"),
+        ("Интервьюеров", int(df["inter"].nunique())), ("Городов", int(df["city"].nunique())),
+    ]
+    if quota and quota.get("enabled"):
+        sm = quota["summary"]
+        summary += [("Выполнение квот", f"{sm['pct']}% ({sm['ok']} из {sm['plan']})"), ("Осталось добрать", sm["left"])]
+
+    def build(writer):
+        write_sheet(writer, "Сводка", pd.DataFrame(summary, columns=["Показатель", "Значение"]),
+                    title=f"Контроль качества полевых работ — {project}")
+        reasons = engine.issue_breakdown(df, engine.DEFECT)
+        if reasons:
+            write_sheet(writer, "Причины брака", pd.DataFrame(reasons).drop(columns=["code"])
+                        .rename(columns={"%": "% от брака"}))
+        if quota and quota.get("enabled"):
+            write_sheet(writer, "Квоты", pd.DataFrame(quota["rows"]), status_col="Статус")
+        inter = pd.DataFrame(result["interviewers"])
+        if len(inter):
+            cols = [c for c in ("Интервьюер", "Город", "Анкет", "Брак", "% брака", "Статус", "Риск (средний)") if c in inter]
+            write_sheet(writer, "Интервьюеры", inter[cols], status_col="Статус")
+        write_sheet(writer, "Чистая база", clean)
     return _to_bytes(build)
 
 

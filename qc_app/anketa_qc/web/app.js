@@ -6,6 +6,7 @@ const S = { state: null, result: null, history: null, page: "data", anketaFilter
 const DECISION_CLASS = { "Брак": "d-brak", "Принять": "d-ok", "На перезвон": "d-call" };
 const DECISION_ICON = { "Брак": "❌", "Принять": "✅", "На перезвон": "📞" };
 const ROLE_LABEL = { admin: "Администратор", lead: "Руководитель проекта", user: "Сотрудник" };
+const riskTag = (v) => h("span", { class: `risk ${v >= 70 ? "hi" : v >= 40 ? "mid" : v > 0 ? "lo" : "none"}`, title: "Балл риска 0–100: чем больше и серьёзнее сигналов, тем выше" }, v ?? 0);
 const decisionTag = (d) => d ? h("span", { class: `decision ${DECISION_CLASS[d]}` }, `${DECISION_ICON[d]} ${d}`) : h("span", { class: "decision d-none" }, "не решено");
 const STATUS_LABEL = { RED: "Критично", YELLOW: "Внимание", GREEN: "Норма" };
 const SEVERITY_OPTIONS = [["defect", "Брак"], ["warning", "Предупреждение"]];
@@ -536,6 +537,8 @@ function pageOverview(root) {
       h("button", { class: "btn small", onclick: () => go("review") }, "Открыть проверку"),
       h("button", { class: "btn small", onclick: () => exportReport("clean") }, "Чистая база")));
   }
+  root.append(h("div", { class: "row", style: "justify-content:flex-end;margin:-6px 0 16px" },
+    h("button", { class: "btn", onclick: () => exportReport("client") }, "Отчёт для заказчика (Excel)")));
   root.append(h("div", { class: "grid-2" },
     h("div", { class: "card" }, h("h2", {}, "Причины брака"), h("p", { class: "hint" }, "Одна анкета может иметь несколько причин."), reasonsTable(R.defect_reasons, "% брака")),
     h("div", { class: "card" }, h("h2", {}, "Предупреждения"), h("p", { class: "hint" }, "Сигналы для ручной проверки — сами по себе не брак."), reasonsTable(R.warning_reasons, "% анкет"))));
@@ -564,6 +567,7 @@ function pageInterviewers(root) {
       { key: "Анкет", label: "Анкет", num: true }, { key: "Брак", label: "Брак", num: true },
       { key: "% брака", label: "% брака", num: true, digits: 1 },
       { key: "Предупреждений", label: "Предупр.", num: true },
+      { key: "Риск (средний)", label: "Риск", num: true, render: (r) => riskTag(r["Риск (средний)"]) },
       { key: "Повтор значения", label: "Повтор значения", render: (r) => r["Повтор значения"] ? h("span", {}, r["Повтор: статус"] !== "GREEN" ? h("span", { class: `dot ${r["Повтор: статус"]}` }) : null, " ", r["Повтор значения"]) : "" },
       { key: "Главные причины брака", label: "Главные причины брака", wrap: true },
     ], R.interviewers, { rowClass: (r) => `row-${r["Статус"]}`, onClick: (r) => showInterviewer(r["Интервьюер"]) })));
@@ -582,6 +586,7 @@ function anketaColumns() {
     { key: "id", label: "ID анкеты" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
     { key: "start", label: "Старт", sortVal: (r) => r.start && r.start.split(/[. :]/).reverse().join("") },
     { key: "duration", label: "Мин", num: true, digits: 1 },
+    { key: "risk", label: "Риск", num: true, render: (r) => riskTag(r.risk) },
     { key: "reasons", label: "Причина брака", wrap: true },
     { key: "warnings", label: "Предупреждения", wrap: true },
     { key: "decision", label: "Решение", render: (r) => decisionTag(r.decision) },
@@ -1198,12 +1203,13 @@ function pageReview(root) {
     ...(rv.can_decide ? [{ key: "chk", label: "", render: (r) => h("input", { type: "checkbox", checked: S.sel.has(r.pos),
       onclick: (e) => e.stopPropagation(), onchange: (e) => { e.target.checked ? S.sel.add(r.pos) : S.sel.delete(r.pos); updateCount(); } }) }] : []),
     { key: "decision", label: "Решение", render: (r) => decisionTag(r.decision) },
+    { key: "risk", label: "Риск", num: true, render: (r) => riskTag(r.risk) },
     { key: "id", label: "ID анкеты" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
     { key: "start", label: "Старт", sortVal: (r) => r.start && r.start.split(/[. :]/).reverse().join("") },
     { key: "reasons", label: "Почему система отметила", wrap: true, render: (r) => r.reasons || r.warnings },
     { key: "decision_comment", label: "Комментарий", wrap: true, render: (r) => r.decision_comment ? `${r.decision_comment} (${r.decision_by})` : "" },
   ];
-  const tbl = table(cols, rows, { tools: seg, height: 620, onClick: (r) => openAnketa(r.pos), sortKey: "start", asc: true,
+  const tbl = table(cols, rows, { tools: seg, height: 620, onClick: (r) => openAnketa(r.pos), sortKey: "risk", asc: false,
     rowClass: (r) => r.defect ? "row-RED" : r.warning ? "row-YELLOW" : "", empty: S.reviewFilter === "todo" ? "Все подозрительные анкеты разобраны 🎉" : "Нет анкет" });
   if (rv.can_decide) {
     const th = tbl.querySelector("thead th");
@@ -1212,7 +1218,7 @@ function pageReview(root) {
   }
   root.append(bulk, h("div", { class: "card" },
     h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Анкеты на проверку"),
-      h("p", { class: "hint" }, "Нажмите на строку — откроется объяснение, почему система отметила анкету, и исходная строка из Google-таблицы. Решения записываются на лист «Решения ОТК» той же таблицы и видны всей команде.")),
+      h("p", { class: "hint" }, "Сначала самые подозрительные (по баллу риска). Нажмите на строку — откроется объяснение, почему система отметила анкету, и исходная строка из Google-таблицы. Решения записываются на лист «Решения ОТК» той же таблицы и видны всей команде.")),
       h("button", { class: "btn", onclick: () => exportReport("clean") }, "Чистая база (Excel)")),
     tbl));
 }
@@ -1240,6 +1246,7 @@ async function openAnketa(pos) {
   const body = h("div", {},
     h("div", { class: "facts" },
       h("div", {}, h("b", {}, "Решение"), decisionTag(a.decision)),
+      h("div", {}, h("b", {}, "Балл риска"), riskTag(a.risk)),
       h("div", {}, h("b", {}, "Город"), d.city || "—"),
       h("div", {}, h("b", {}, "Интервьюер"), d.inter || "—"),
       h("div", {}, h("b", {}, "Устройство"), d.device || "—"),

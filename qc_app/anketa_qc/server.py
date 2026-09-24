@@ -117,6 +117,18 @@ class Session:
             if not q.get("enabled"):
                 raise ValueError("Квоты не настроены")
             return f"kvoty_{slug}_{stamp}.xlsx", export.simple_report("Квоты", q["rows"], status_col="Статус")
+        if kind == "client":
+            dec = self.decisions_by_pos()
+            clean, todo = review.clean_base(r, dec)
+            counts = {}
+            for d in dec.values():
+                counts[d["decision"]] = counts.get(d["decision"], 0) + 1
+            try:
+                q = quotas.compute(r, self.config, dec)
+            except ValueError:
+                q = None
+            return f"otchet_zakazchiku_{slug}_{stamp}.xlsx", export.client_report(
+                r, clean, todo, q, self.project, self.source_label, counts)
         if kind == "clean":
             clean, todo = review.clean_base(r, self.decisions_by_pos())
             return f"chistaya_baza_{slug}_{stamp}.xlsx", export.clean_report(clean, todo)
@@ -171,6 +183,7 @@ def result_payload(sess):
         "duration": None if pd.isna(x.duration_min) else round(float(x.duration_min), 1),
         "defect": bool(x.is_defect), "warning": bool(x.is_warning),
         "reasons": x.reason_text, "warnings": x.warning_text,
+        "risk": int(x.risk),
     } for x in df.itertuples()]
 
     cities = []

@@ -398,3 +398,7 @@ tr.hl td { background: var(--yellow-soft) !important; font-weight: 550; }
 .dim-row { display: grid; grid-template-columns: 200px 1fr 260px auto; gap: 10px; align-items: center; padding: 10px 0; }
 .dim-row + .dim-row { border-top: 1px solid var(--line); }
 td input.target { width: 90px; }
+
+.risk { display: inline-block; min-width: 34px; text-align: center; padding: 1px 7px; border-radius: 7px; font-weight: 650; font-size: 12px; font-variant-numeric: tabular-nums; }
+.risk.hi { background: var(--red); color: #fff; } .risk.mid { background: var(--yellow-soft); color: var(--yellow); }
+.risk.lo { background: var(--fill-2); color: var(--ink-2); } .risk.none { color: var(--ink-3); }

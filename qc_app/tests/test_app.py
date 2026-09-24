@@ -381,3 +381,15 @@ def test_decisions_detail_and_clean_base(tmp_path, demo_bytes):
     r2 = c2.post("/api/run", json={}).get_json()
     assert r2["summary"]["review"]["can_decide"] is False
     assert c2.post("/api/decisions", json={"positions": [0], "decision": "Брак"}).status_code == 403
+
+
+def test_client_report(tmp_path, demo_bytes):
+    client = create_app(tmp_path, client_factory=FakeClient).test_client()
+    login(client)
+    client.post("/api/source/file", data={"file": (io.BytesIO(demo_bytes), "demo.xlsx")}, content_type="multipart/form-data")
+    r = client.post("/api/run", json={}).get_json()
+    assert all("risk" in a for a in r["anketas"]) and max(a["risk"] for a in r["anketas"]) >= 70
+    wb = openpyxl.load_workbook(io.BytesIO(client.get("/api/export/client").data))
+    assert {"Сводка", "Причины брака", "Интервьюеры", "Чистая база"} <= set(wb.sheetnames)
+    summary = {row[0]: row[1] for row in wb["Сводка"].iter_rows(min_row=4, values_only=True) if row[0]}
+    assert summary["Всего анкет"] == len(r["anketas"])

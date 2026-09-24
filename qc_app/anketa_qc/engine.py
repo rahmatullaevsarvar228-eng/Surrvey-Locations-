@@ -60,6 +60,27 @@ STATUS_LEVELS = {
 }
 
 
+# Вес сигнала для балла риска (0..1): насколько сильно он сам по себе
+# говорит о фальсификации. Балл анкеты = 100 × (1 − Π(1 − вес)) — несколько
+# слабых сигналов складываются, один сильный уже даёт высокий балл.
+RISK_WEIGHTS = {
+    "conveyor": 0.7, "geo_same": 0.7, "geo_jump": 0.6, "dup_phone": 0.6,
+    "no_device": 0.5, "too_short": 0.5, "start_gap": 0.4, "geo_far": 0.4, "no_rest": 0.35,
+    "night": 0.3, "dup_name": 0.3, "probe_low_avg": 0.3, "geo_cluster": 0.3,
+    "too_long": 0.2, "probe_depth": 0.2, "device_multi_inter": 0.2, "no_gps": 0.15, "inter_multi_device": 0.1,
+}
+
+
+def risk_score(issues):
+    keep = 1.0
+    for code, sev, _ in issues:
+        w = RISK_WEIGHTS.get(code)
+        if w is None:                      # пользовательские правила
+            w = 0.5 if sev == DEFECT else 0.25
+        keep *= 1 - w
+    return int(round(100 * (1 - keep)))
+
+
 def status_for_pct(pct, red_pct, yellow_pct):
     if pct is None or (isinstance(pct, float) and np.isnan(pct)):
         return "GREEN"
@@ -477,6 +498,7 @@ def run(raw_input, cfg):
     df["is_defect"] = df["issues"].map(lambda xs: any(s == DEFECT for _, s, _ in xs))
     df["is_warning"] = df["issues"].map(lambda xs: any(s == WARNING for _, s, _ in xs))
     df["reason_text"] = df["issues"].map(lambda xs: "; ".join(x for _, s, x in xs if s == DEFECT))
+    df["risk"] = df["issues"].map(risk_score)
     df["warning_text"] = df["issues"].map(lambda xs: "; ".join(x for _, s, x in xs if s == WARNING))
 
     city_issues = check_cities(df, cfg)
@@ -624,6 +646,7 @@ def summarize_interviewers(df, cfg, repetition):
             "% брака": pct,
             "Статус": status_for_pct(pct, red, yellow),
             "Предупреждений": int(g["is_warning"].sum()),
+            "Риск (средний)": int(round(g["risk"].mean())) if n else 0,
             "Повтор значения": f"{rep['Самое частое значение']} — {rep['% повтора']}%" if rep else "",
             "Повтор: статус": rep["Статус"] if rep else "",
             "Главные причины брака": top,
