@@ -31,9 +31,27 @@ jobs:
       - name: Build exe
         run: pyinstaller packaging/anketa_qc.spec --noconfirm --distpath dist --workpath build
 
-      - name: Smoke test of built exe
+      - name: Add .NET config next to exe
+        shell: pwsh
+        run: Copy-Item packaging\AnketaQC.exe.config dist\AnketaQC\AnketaQC.exe.config
+
+      - name: Smoke test as if downloaded from the internet
         shell: pwsh
         run: |
+          # Ставим на все файлы пометку «скачано из интернета», как Windows делает
+          # при распаковке скачанного zip, — именно так падал запуск у пользователя.
+          $zone = "[ZoneTransfer]`r`nZoneId=3"
+          $files = Get-ChildItem dist\AnketaQC -Recurse -File -Include *.dll,*.exe,*.pyd
+          $files | ForEach-Object { Set-Content -Path $_.FullName -Stream Zone.Identifier -Value $zone }
+          Write-Host "Marked $($files.Count) files"
+          # Для справки: без снятия пометки и без .config (так было в версии 1.0.0)
+          Rename-Item dist\AnketaQC\AnketaQC.exe.config AnketaQC.exe.config.off
+          $env:ANKETA_QC_NO_UNBLOCK = "1"
+          $old = Start-Process -FilePath "dist\AnketaQC\AnketaQC.exe" -ArgumentList "--selftest" -Wait -PassThru
+          Write-Host "Without the fix: exit code $($old.ExitCode) (expected non-zero)"
+          Remove-Item Env:ANKETA_QC_NO_UNBLOCK
+          Rename-Item dist\AnketaQC\AnketaQC.exe.config.off AnketaQC.exe.config
+          $files | ForEach-Object { Set-Content -Path $_.FullName -Stream Zone.Identifier -Value $zone }
           $p = Start-Process -FilePath "dist\AnketaQC\AnketaQC.exe" -ArgumentList "--selftest" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
 
