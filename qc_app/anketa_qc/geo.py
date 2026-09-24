@@ -6,7 +6,10 @@
     чем разрешено на точку (жадная кластеризация по факту координат);
   - одинаковые до метра координаты в нескольких анкетах одного интервьюера —
     признак копирования анкет или подмены GPS;
-  - нет координат в анкете.
+  - нет координат в анкете;
+  - «телепорт»: между соседними анкетами интервьюера он переместился быстрее,
+    чем реально можно (по умолчанию > 60 км/ч и дальше 1 км);
+  - у каждой плановой точки может быть свой радиус и своя квота анкет.
 
 План точек хранится в настройках проекта: {город: {"points": [{lat, lon,
 street_ru}]}}. Встроенный план (14 городов, 97 точек) — из geo_app.py.
@@ -97,7 +100,10 @@ def check(df, cfg, add):
     max_dist = float(g.get("max_dist_km", 2.0))
     df["geo_dist"] = np.nan
     df["geo_point"] = None
+    df["geo_radius"] = np.nan
+    df["geo_far"] = False
     unmatched = set()
+    point_stats = []
     for city, grp in df[has_gps].groupby("city"):
         found = plan.get(str(city).strip().lower())
         if not found or not found[1]:
@@ -106,16 +112,32 @@ def check(df, cfg, add):
         pts = found[1]
         p_lat = np.array([float(p["lat"]) for p in pts])
         p_lon = np.array([float(p["lon"]) for p in pts])
+        radius = np.array([float(p.get("radius_km") or max_dist) for p in pts])
         labels = [p.get("street_ru") or p.get("name") or f"Точка {k + 1}" for k, p in enumerate(pts)]
         dist = haversine_km(grp["lat"].to_numpy()[:, None], grp["lon"].to_numpy()[:, None],
                             p_lat[None, :], p_lon[None, :])
         best = dist.argmin(axis=1)
+        inside = dist <= radius[None, :]
         df.loc[grp.index, "geo_dist"] = dist[np.arange(len(grp)), best]
         df.loc[grp.index, "geo_point"] = [labels[b] for b in best]
-    far = df["geo_dist"] > max_dist
+        df.loc[grp.index, "geo_radius"] = radius[best]
+        # «не на месте» — анкета не попала в радиус ни одной точки своего города
+        df.loc[grp.index, "geo_far"] = ~inside.any(axis=1)
+        for k, p in enumerate(pts):
+            mine = grp[best == k]
+            n_in = int(inside[best == k, k].sum())
+            quota = int(p["quota"]) if str(p.get("quota") or "").strip().isdigit() else None
+            point_stats.append({
+                "Город": found[0], "Точка": labels[k], "Радиус, км": round(float(radius[k]), 2),
+                "Анкет": n_in, "Квота": quota,
+                "Интервьюеров": int(mine[inside[best == k, k]]["inter"].nunique()),
+                "Статус": "RED" if quota is not None and n_in > quota else ("GREEN" if n_in else "YELLOW"),
+                "lat": float(p["lat"]), "lon": float(p["lon"]),
+            })
+    far = df["geo_far"].astype(bool)
     add(far, "geo_far", g.get("far_severity", "warning"),
         lambda i: f"в {df.at[i, 'geo_dist']:.1f} км от ближайшей точки опроса «{df.at[i, 'geo_point']}» "
-                  f"(> {max_dist:g} км)")
+                  f"(допустимо {df.at[i, 'geo_radius']:g} км)")
 
     # скопления по факту координат — у каждого интервьюера в каждом городе
     max_per_point = int(g.get("max_per_point", 20))
@@ -145,17 +167,39 @@ def check(df, cfg, add):
         lambda i: f"точно такие же координаты ещё в {int(df.at[i, 'geo_same_n']) - 1} анкет(ах) "
                   f"этого интервьюера — похоже на копирование или подмену GPS")
 
+    # «телепорт»: соседние анкеты интервьюера слишком далеко для прошедшего времени
+    max_speed = float(g.get("max_speed_kmh", 60))
+    min_jump = float(g.get("min_jump_km", 1.0))
+    df["geo_jump"] = None
+    for _, grp in df[has_gps & df["start"].notna()].sort_values("start").groupby(df["inter"].fillna("—")):
+        prev = None
+        for i, r in grp.iterrows():
+            if prev is not None:
+                km = float(haversine_km(prev.lat, prev.lon, r.lat, r.lon))
+                since = prev.end if pd.notna(prev.end) and prev.end <= r.start else prev.start
+                hours = (r.start - since).total_seconds() / 3600
+                speed = km / hours if hours > 0 else np.inf
+                if km >= min_jump and speed > max_speed:
+                    minutes = hours * 60
+                    df.at[i, "geo_jump"] = (f"через {minutes:.0f} мин после анкеты {prev.row_id} — в {km:.1f} км от неё "
+                                            f"(≈{min(speed, 999):.0f} км/ч, > {max_speed:g})")
+            prev = r
+    add(df["geo_jump"].notna(), "geo_jump", g.get("jump_severity", "warning"), lambda i: df.at[i, "geo_jump"])
+
     points = [{
         "id": r.row_id, "city": r.city, "inter": r.inter, "lat": round(float(r.lat), 6), "lon": round(float(r.lon), 6),
         "dist": None if pd.isna(r.geo_dist) else round(float(r.geo_dist), 2), "point": r.geo_point,
-        "far": bool(r.geo_dist > max_dist) if not pd.isna(r.geo_dist) else False,
+        "far": bool(r.geo_far),
         "cluster": bool(r.geo_cluster_n > max_per_point), "same": bool(r.geo_same_n >= same_min),
+        "jump": r.geo_jump is not None, "start": None if pd.isna(r.start) else r.start.strftime("%d.%m %H:%M"),
     } for r in df[has_gps].itertuples()]
     return {
         "enabled": True,
         "with_gps": int(has_gps.sum()), "without_gps": int((~has_gps).sum()),
         "far": int(far.sum()), "clusters_over": sum(1 for c in clusters if c["Статус"] == "RED"),
         "same": int((df["geo_same_n"] >= same_min).sum()),
+        "jumps": int(df["geo_jump"].notna().sum()), "max_speed_kmh": max_speed,
+        "point_stats": point_stats,
         "max_dist_km": max_dist, "max_per_point": max_per_point, "min_sep_km": min_sep,
         "unmatched_cities": sorted(map(str, unmatched)),
         "plan": {city: data for city, data in (g.get("plan") or {}).items()},
@@ -177,6 +221,7 @@ def plan_from_frame(df):
         return None
     c_city, c_lat, c_lon = pick("город", "city", "shahar"), pick("широта", "lat"), pick("долгота", "lon")
     c_name = pick("название", "адрес", "точка", "name")
+    c_radius, c_quota = pick("радиус", "radius"), pick("квота", "quota", "план")
     if not (c_city and c_lat and c_lon):
         raise ValueError("В файле плана нужны колонки «Город», «Широта», «Долгота»")
     plan = {}
@@ -191,6 +236,12 @@ def plan_from_frame(df):
         point = {"lat": lat, "lon": lon}
         if c_name and not pd.isna(r[c_name]):
             point["street_ru"] = str(r[c_name]).strip()
+        for col, key, conv in ((c_radius, "radius_km", float), (c_quota, "quota", int)):
+            if col is not None and not pd.isna(r[col]):
+                try:
+                    point[key] = conv(float(str(r[col]).replace(",", ".")))
+                except ValueError:
+                    pass
         plan.setdefault(city, {"points": []})["points"].append(point)
     if not plan:
         raise ValueError("В файле плана не нашлось ни одной точки с координатами")

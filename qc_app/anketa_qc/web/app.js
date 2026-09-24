@@ -940,6 +940,8 @@ function pageGps(root) {
         [number(g, "min_sep_km", 0.05, 20, 0.05), h("span", { class: "unit" }, "км")]),
       formRow("Одинаковые координаты", "Столько анкет интервьюера с координатами, совпадающими до метра, — похоже на копирование или подмену GPS",
         [number(g, "same_point_min", 2, 100), h("span", { class: "unit" }, "анкет"), sev("same_severity")]),
+      formRow("«Телепорт»", "Между соседними анкетами интервьюер переместился быстрее этой скорости (и дальше минимального расстояния)",
+        [number(g, "max_speed_kmh", 5, 500), h("span", { class: "unit" }, "км/ч"), number(g, "min_jump_km", 0.1, 50, 0.1), h("span", { class: "unit" }, "км"), sev("jump_severity")]),
       formRow("Нет координат", "GPS не записался в анкете", sev("no_gps_severity")))));
 
   const fileInput = h("input", { type: "file", accept: ".xlsx", hidden: true, onchange: async (e) => {
@@ -949,17 +951,87 @@ function pageGps(root) {
   } });
   root.append(h("div", { class: "card" },
     h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "План точек опроса"),
-      h("p", { class: "hint" }, nPoints ? `${cities.length} городов, ${nPoints} точек. Анкеты из городов, которых нет в плане, по расстоянию не проверяются (скопления и одинаковые координаты — проверяются).`
-        : "План не задан — проверяются только скопления, одинаковые координаты и отсутствие GPS.")),
+      h("p", { class: "hint" }, nPoints ? `${cities.length} городов, ${nPoints} точек. Анкета «на месте», если попала в радиус хоть одной точки своего города. Для городов без плана проверяются только скопления, одинаковые координаты и «телепорт».`
+        : "План не задан — проверяются только скопления, одинаковые координаты, «телепорт» и отсутствие GPS. Точки можно поставить на карте ниже, загрузить из Excel или взять встроенный план.")),
       h("div", { class: "row" },
         h("button", { class: "btn", onclick: async () => { await guarded(async () => { g.plan = await GET("/api/geo/default-plan"); saveConfigSoon(); toast("Встроенный план загружен"); go("gps"); }); } }, "Встроенный план (14 городов)"),
         h("button", { class: "btn", onclick: () => fileInput.click() }, "Из Excel…"), fileInput,
-        nPoints ? h("button", { class: "btn danger", onclick: () => { if (confirm("Очистить план точек?")) { g.plan = {}; saveConfigSoon(); go("gps"); } } }, "Очистить") : null)),
-    h("p", { class: "muted small" }, "Excel для плана: колонки «Город», «Широта», «Долгота» и необязательная «Название»."),
-    nPoints ? table([{ key: "city", label: "Город" }, { key: "n", label: "Точек", num: true },
-      { key: "names", label: "Точки", wrap: true }],
-      cities.map((k) => ({ city: k, n: plan[k].points.length, names: plan[k].points.map((p, i) => p.street_ru || `Точка ${i + 1}`).join(" · ") })),
-      { search: false, height: 360 }) : null));
+        nPoints ? h("button", { class: "btn danger", onclick: () => { if (confirm("Очистить весь план точек?")) { g.plan = {}; saveConfigSoon(); go("gps"); } } }, "Очистить") : null)),
+    h("p", { class: "muted small" }, "Excel для плана: колонки «Город», «Широта», «Долгота», необязательные «Название», «Радиус» (км) и «Квота» (анкет на точку)."),
+    planEditor(g)));
+}
+
+// Редактор плана на карте: клик — новая точка, точку можно перетащить,
+// по клику на точку — название, радиус, квота, удаление.
+let planMap = null;
+function planEditor(g) {
+  g.plan = g.plan || {};
+  const cities = Object.keys(g.plan).sort((a, b) => a.localeCompare(b, "ru"));
+  S.planCity = cities.includes(S.planCity) ? S.planCity : (cities[0] || "");
+  const box = h("div", { class: "map", style: "height:480px" });
+  const citySel = select(cities, S.planCity, (v) => { S.planCity = v; go("gps"); }, cities.length ? undefined : "— нет городов —");
+  const wrap = h("div", { style: "margin-top:16px" },
+    h("div", { class: "row", style: "margin-bottom:10px" }, h("b", {}, "Город:"), citySel,
+      h("button", { class: "btn small", onclick: () => {
+        const name = (prompt("Название города (как в колонке «Город» анкет)") || "").trim().replace(/^г\.\s*/, "");
+        if (!name) return;
+        g.plan[name] = g.plan[name] || { points: [] }; S.planCity = name; saveConfigSoon(); go("gps");
+      } }, "+ Город"),
+      S.planCity ? h("button", { class: "btn small danger", onclick: () => {
+        if (!confirm(`Удалить город «${S.planCity}» из плана?`)) return;
+        delete g.plan[S.planCity]; S.planCity = ""; saveConfigSoon(); go("gps");
+      } }, "Удалить город") : null,
+      h("span", { class: "spacer" }),
+      h("span", { class: "muted small" }, S.planCity ? "Клик по карте — новая точка · точку можно перетащить · клик по точке — настройки" : "Добавьте город, чтобы ставить точки")),
+    box);
+  if (planMap) { planMap.remove(); planMap = null; }
+  if (!window.L) return wrap;
+  setTimeout(() => {
+    planMap = L.map(box);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(planMap);
+    const layer = L.layerGroup().addTo(planMap);
+    const pts = () => (g.plan[S.planCity] || { points: [] }).points;
+    const draw = (fit) => {
+      layer.clearLayers();
+      pts().forEach((p, i) => {
+        const r = (Number(p.radius_km) || g.max_dist_km) * 1000;
+        L.circle([p.lat, p.lon], { radius: r, color: "#0A84FF", weight: 1, fillOpacity: 0.05, interactive: false }).addTo(layer);
+        const m = L.marker([p.lat, p.lon], { draggable: true, title: p.street_ru || `Точка ${i + 1}` }).addTo(layer);
+        m.bindTooltip(h("span", {}, p.street_ru || `Точка ${i + 1}`));
+        m.on("dragend", () => { const ll = m.getLatLng(); p.lat = +ll.lat.toFixed(6); p.lon = +ll.lng.toFixed(6); saveConfigSoon(); draw(false); });
+        m.on("click", () => {
+          const name = h("input", { type: "text", value: p.street_ru || "", placeholder: "Название / адрес" });
+          const rad = h("input", { type: "number", min: 0.05, step: 0.05, value: p.radius_km || "", placeholder: String(g.max_dist_km) });
+          const quota = h("input", { type: "number", min: 0, step: 1, value: p.quota ?? "", placeholder: "без квоты" });
+          const el = h("div", { style: "display:flex;flex-direction:column;gap:8px;min-width:220px" },
+            h("label", { class: "field" }, h("span", {}, "Название"), name),
+            h("label", { class: "field" }, h("span", {}, "Радиус, км"), rad),
+            h("label", { class: "field" }, h("span", {}, "Квота анкет на точку"), quota),
+            h("div", { class: "row" },
+              h("button", { class: "btn small primary", onclick: () => {
+                p.street_ru = name.value.trim() || undefined;
+                p.radius_km = Number(rad.value) > 0 ? Number(rad.value) : undefined;
+                p.quota = quota.value === "" ? undefined : Math.max(0, Math.round(Number(quota.value)));
+                saveConfigSoon(); planMap.closePopup(); draw(false);
+              } }, "Сохранить"),
+              h("button", { class: "btn small danger", onclick: () => { pts().splice(pts().indexOf(p), 1); saveConfigSoon(); planMap.closePopup(); draw(false); } }, "Удалить")));
+          L.popup().setLatLng(m.getLatLng()).setContent(el).openOn(planMap);
+        });
+      });
+      if (fit) {
+        const b = pts().map((p) => [p.lat, p.lon]);
+        if (b.length) planMap.fitBounds(b, { padding: [40, 40], maxZoom: 14 }); else planMap.setView([41.3, 69.24], 11);
+      }
+    };
+    planMap.on("click", (e) => {
+      if (!S.planCity) return toast("Сначала добавьте город", true);
+      pts().push({ lat: +e.latlng.lat.toFixed(6), lon: +e.latlng.lng.toFixed(6), street_ru: `Точка ${pts().length + 1}` });
+      g.plan[S.planCity].points = pts();
+      saveConfigSoon(); draw(false);
+    });
+    planMap.invalidateSize(); draw(true);
+  }, 30);
+  return wrap;
 }
 
 // ── GPS: карта ──────────────────────────────────────────────────────────────
@@ -977,7 +1049,8 @@ function pageMap(root) {
     h("div", { class: "stat" }, h("div", { class: "k" }, "Анкет с GPS"), h("div", { class: "v" }, fmt(g.with_gps)), h("div", { class: "s" }, g.without_gps ? `без GPS: ${fmt(g.without_gps)}` : "у всех есть координаты")),
     h("div", { class: "stat red" }, h("div", { class: "k" }, "Далеко от точки"), h("div", { class: "v" }, fmt(g.far)), h("div", { class: "s" }, `дальше ${g.max_dist_km} км`)),
     h("div", { class: "stat yellow" }, h("div", { class: "k" }, "Скоплений сверх лимита"), h("div", { class: "v" }, fmt(g.clusters_over)), h("div", { class: "s" }, `больше ${g.max_per_point} анкет в одном месте`)),
-    h("div", { class: "stat red" }, h("div", { class: "k" }, "Одинаковые координаты"), h("div", { class: "v" }, fmt(g.same)), h("div", { class: "s" }, "анкет — копирование/подмена GPS"))));
+    h("div", { class: "stat red" }, h("div", { class: "k" }, "Одинаковые координаты"), h("div", { class: "v" }, fmt(g.same)), h("div", { class: "s" }, "анкет — копирование/подмена GPS")),
+    h("div", { class: "stat red" }, h("div", { class: "k" }, "«Телепорт»"), h("div", { class: "v" }, fmt(g.jumps || 0)), h("div", { class: "s" }, `быстрее ${g.max_speed_kmh} км/ч между анкетами`))));
   if (g.unmatched_cities.length) root.append(h("div", { class: "notice warn" }, `Нет в плане точек: ${g.unmatched_cities.join(", ")} — расстояние для этих городов не проверяется.`));
 
   const cities = [...new Set(g.points.map((p) => p.city))].sort((a, b) => String(a).localeCompare(String(b), "ru"));
@@ -989,13 +1062,13 @@ function pageMap(root) {
     select(cities, S.mapCity, (v) => { S.mapCity = v; S.mapInter = ""; go("map"); }),
     select(inters(S.mapCity), S.mapInter, (v) => { S.mapInter = v || ""; draw(); }, "Все интервьюеры"),
     h("span", { class: "spacer" }),
-    h("span", { class: "muted small" }, "Нажмите на точку — увидите анкету"));
+    h("span", { class: "muted small" }, "Выберите интервьюера — покажу его маршрут по времени"));
   root.append(h("div", { class: "card" }, controls, box,
     h("div", { class: "map-legend" },
       h("span", {}, h("i", { style: "background:#0A84FF" }), "плановая точка и допустимый радиус"),
       h("span", {}, h("i", { style: "background:#34C759" }), "анкета в норме"),
       h("span", {}, h("i", { style: "background:#FF9F0A" }), "в скоплении"),
-      h("span", {}, h("i", { style: "background:#E0352B" }), "далеко от точки / одинаковые координаты"))));
+      h("span", {}, h("i", { style: "background:#E0352B" }), "далеко от точки / одинаковые координаты / «телепорт»"))));
 
   if (leafletMap) { leafletMap.remove(); leafletMap = null; }
   if (!window.L) { box.replaceChildren(h("div", { class: "empty" }, "Карта не загрузилась.")); return; }
@@ -1008,17 +1081,25 @@ function pageMap(root) {
     const bounds = [];
     const planPts = ((g.plan[S.mapCity] || Object.entries(g.plan).find(([k]) => k.toLowerCase() === String(S.mapCity).toLowerCase())?.[1] || {}).points) || [];
     planPts.forEach((p, i) => {
-      L.circle([p.lat, p.lon], { radius: g.max_dist_km * 1000, color: "#0A84FF", weight: 1, fillOpacity: 0.04 }).addTo(layer);
+      L.circle([p.lat, p.lon], { radius: (Number(p.radius_km) || g.max_dist_km) * 1000, color: "#0A84FF", weight: 1, fillOpacity: 0.04 }).addTo(layer);
       L.circleMarker([p.lat, p.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#0A84FF", fillOpacity: 1 })
-        .bindTooltip(p.street_ru || `Точка ${i + 1}`).addTo(layer);
+        .bindTooltip(h("span", {}, p.street_ru || `Точка ${i + 1}`)).addTo(layer);
       bounds.push([p.lat, p.lon]);
     });
-    g.points.filter((p) => p.city === S.mapCity && (!S.mapInter || p.inter === S.mapInter)).forEach((p) => {
-      const bad = p.far || p.same;
+    const shown = g.points.filter((p) => p.city === S.mapCity && (!S.mapInter || p.inter === S.mapInter));
+    if (S.mapInter) {
+      // маршрут интервьюера: анкеты по времени, отдельной линией на каждый день
+      const byDay = {};
+      shown.filter((p) => p.start).sort((a, b) => a.start.localeCompare(b.start)).forEach((p) => { (byDay[p.start.slice(0, 5)] ||= []).push([p.lat, p.lon]); });
+      Object.values(byDay).forEach((line) => L.polyline(line, { color: "#5856D6", weight: 2, opacity: 0.7, dashArray: "4 6" }).addTo(layer));
+    }
+    shown.forEach((p) => {
+      const bad = p.far || p.same || p.jump;
       const color = bad ? "#E0352B" : p.cluster ? "#FF9F0A" : "#34C759";
-      const why = [p.far && `далеко: ${p.dist} км от «${p.point}»`, p.cluster && "в скоплении", p.same && "одинаковые координаты"].filter(Boolean).join(", ");
+      const why = [p.far && `далеко: ${p.dist} км от «${p.point}»`, p.cluster && "в скоплении", p.same && "одинаковые координаты", p.jump && "«телепорт»"].filter(Boolean).join(", ");
+      const esc = (t) => String(t ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
       L.circleMarker([p.lat, p.lon], { radius: 5, color: "#fff", weight: 1, fillColor: color, fillOpacity: 0.9 })
-        .bindPopup(`<b>${p.inter}</b> · анкета ${p.id}<br>${p.dist != null ? `до точки ${p.dist} км` : "город не в плане"}${why ? `<br><span style="color:${color}">${why}</span>` : ""}`)
+        .bindPopup(`<b>${esc(p.inter)}</b> · анкета ${esc(p.id)}${p.start ? ` · ${esc(p.start)}` : ""}<br>${p.dist != null ? `до точки ${p.dist} км` : "город не в плане"}${why ? `<br><span style="color:${color}">${esc(why)}</span>` : ""}`)
         .addTo(layer);
       bounds.push([p.lat, p.lon]);
     });
@@ -1034,11 +1115,20 @@ function pageMap(root) {
       { key: "Город", label: "Город" }, { key: "Интервьюер", label: "Интервьюер" }, { key: "Точка", label: "Точка" },
       { key: "Анкет", label: "Анкет", num: true }, { key: "Лимит", label: "Лимит", num: true }],
       g.clusters, { sortKey: "Анкет", rowClass: (r) => `row-${r["Статус"]}`, height: 420 })));
-  const flagged = g.points.filter((p) => p.far || p.same);
+  if ((g.point_stats || []).length) {
+    root.append(h("div", { class: "card" }, h("h2", {}, "Плановые точки"),
+      h("p", { class: "hint" }, "Сколько анкет собрано в радиусе каждой точки и не превышена ли её квота (квоту и радиус задают в «GPS-контроль»)."),
+      table([{ key: "Статус", label: "", render: (r) => h("span", { class: `dot ${r["Статус"]}`, title: { RED: "квота превышена", GREEN: "есть анкеты", YELLOW: "анкет нет" }[r["Статус"]] }) },
+        { key: "Город", label: "Город" }, { key: "Точка", label: "Точка" }, { key: "Радиус, км", label: "Радиус, км", num: true, digits: 2 },
+        { key: "Анкет", label: "Анкет", num: true }, { key: "Квота", label: "Квота", num: true, render: (r) => r["Квота"] ?? "—" },
+        { key: "Интервьюеров", label: "Интервьюеров", num: true }],
+        g.point_stats, { sortKey: "Анкет", height: 420, rowClass: (r) => r["Статус"] === "RED" ? "row-RED" : "" })));
+  }
+  const flagged = g.points.filter((p) => p.far || p.same || p.jump);
   root.append(h("div", { class: "card" }, h("h2", {}, "Анкеты не на месте"),
     table([{ key: "id", label: "ID анкеты" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
       { key: "dist", label: "До точки, км", num: true, digits: 2 }, { key: "point", label: "Ближайшая точка" },
-      { key: "why", label: "Причина", render: (p) => [p.far && "далеко от точки", p.same && "одинаковые координаты"].filter(Boolean).join(", ") }],
+      { key: "why", label: "Причина", render: (p) => [p.far && "далеко от точки", p.same && "одинаковые координаты", p.jump && "«телепорт»"].filter(Boolean).join(", ") }],
       flagged, { sortKey: "dist", rowClass: () => "row-RED", height: 420, empty: "Все анкеты у плановых точек" })));
 }
 

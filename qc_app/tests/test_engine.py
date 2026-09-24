@@ -264,3 +264,24 @@ def test_quotas():
     plan = quotas.plan_from_frame(pd.DataFrame({"Город": ["г. Ташкент"], "Пол": ["Ж"], "Возраст": ["18-24"], "План": [5]}),
                                   quotas.dim_labels(cfg))
     assert plan == [{"keys": {"Город": "Ташкент", "Пол": "Ж", "Возраст": "18-24"}, "target": 5}]
+
+
+def test_gps_point_radius_quota_and_jump():
+    plan = {"Ташкент": {"points": [{"lat": 41.30, "lon": 69.24, "street_ru": "Рынок", "radius_km": 0.3, "quota": 1},
+                                   {"lat": 41.35, "lon": 69.30, "street_ru": "Метро"}]}}
+    cfg = config.default_config()
+    a = make_row(0, "D1", "A", "2025-09-01 10:00", 10); a["lat"], a["lon"] = 41.3005, 69.2405   # у рынка
+    b = make_row(1, "D1", "A", "2025-09-01 10:20", 10); b["lat"], b["lon"] = 41.3010, 69.2400   # у рынка — квота 1 превышена
+    c = make_row(2, "D1", "A", "2025-09-01 10:35", 10); c["lat"], c["lon"] = 41.50, 69.60       # 35+ км за 5 мин — телепорт
+    d = make_row(3, "D2", "B", "2025-09-01 10:00", 10); d["lat"], d["lon"] = 41.306, 69.24      # 0.7 км: вне радиуса рынка (0.3)
+    df_in = pd.DataFrame([a, b, c, d])
+    cfg["mapping"] = config.suggest_mapping(list(df_in.columns))
+    cfg["mapping"].update(lat="lat", lon="lon")
+    cfg["geo"]["plan"] = plan
+    res = engine.run(df_in, cfg)
+    codes = {rid: {code for code, _, _ in xs} for rid, xs in res["df"].set_index("row_id")["issues"].items()}
+    assert "geo_jump" in codes["1002"] and "geo_jump" not in codes["1001"]
+    assert "geo_far" in codes["1003"] and "geo_far" not in codes["1000"]
+    market = next(p for p in res["geo"]["point_stats"] if p["Точка"] == "Рынок")
+    assert (market["Анкет"], market["Квота"], market["Статус"]) == (2, 1, "RED")
+    assert res["geo"]["jumps"] == 1

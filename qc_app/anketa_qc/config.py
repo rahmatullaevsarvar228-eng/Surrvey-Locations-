@@ -90,6 +90,9 @@ DEFAULT_CONFIG = {
         "cluster_severity": "warning",
         "same_severity": "warning",
         "no_gps_severity": "warning",
+        "max_speed_kmh": 60,         # «телепорт»: быстрее этого между анкетами не переместиться
+        "min_jump_km": 1.0,
+        "jump_severity": "warning",
         "plan": {},                  # {город: {"points": [{lat, lon, street_ru}]}}
     },
     "quotas": {"by_city": True, "dims": [], "plan": []},

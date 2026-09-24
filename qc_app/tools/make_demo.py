@@ -85,9 +85,9 @@ def main(out):
                 elif inter_no == 3:                   # всё в одном месте — скопление
                     p = plan_pts[0]
                     lat, lon = p["lat"] + random.uniform(-0.002, 0.002), p["lon"] + random.uniform(-0.002, 0.002)
-                else:                                 # честно ходит по плановым точкам
-                    p = plan_pts[k % len(plan_pts)]
-                    lat, lon = p["lat"] + random.uniform(-0.006, 0.006), p["lon"] + random.uniform(-0.006, 0.006)
+                else:                                 # честно стоит на точке, потом переходит к следующей
+                    p = plan_pts[(k // 6) % len(plan_pts)]
+                    lat, lon = p["lat"] + random.uniform(-0.003, 0.003), p["lon"] + random.uniform(-0.003, 0.003)
                 if random.random() < 0.03:
                     lat = lon = None                  # GPS не записался
                 row["_Координаты_latitude"] = lat
