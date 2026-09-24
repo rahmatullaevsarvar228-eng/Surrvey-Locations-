@@ -1,7 +1,7 @@
 /* Интерфейс приложения. Без фреймворков и внешних библиотек — всё работает офлайн. */
 "use strict";
 
-const S = { state: null, result: null, history: null, page: "data", sourceMode: "file", anketaFilter: "defect" };
+const S = { state: null, result: null, history: null, page: "data", anketaFilter: "defect", lastRefresh: null };
 const STATUS_LABEL = { RED: "Критично", YELLOW: "Внимание", GREEN: "Норма" };
 const SEVERITY_OPTIONS = [["defect", "Брак"], ["warning", "Предупреждение"]];
 
@@ -35,6 +35,11 @@ async function call(method, url, body, isForm) {
   }
   const res = await fetch(url, opts);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data.auth) {
+    // сессия закончилась или администратор закрыл доступ
+    showLogin(data.error);
+    throw new Error(data.error || "Нужно войти");
+  }
   if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
   return data;
 }
@@ -62,7 +67,7 @@ let saveTimer;
 function saveConfigSoon() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
-    try { S.state = await POST("/api/config", { config: S.state.config }); renderSidebar(); }
+    try { S.state = await POST("/api/config", { config: S.state.config }); renderSidebar(); scheduleAuto(); }
     catch (e) { toast(e.message, true); }
   }, 450);
 }
@@ -197,6 +202,7 @@ const PAGES = {
   answers: { title: "Ответы в открытых вопросах", render: pageAnswers },
   repetition: { title: "Повтор значения у интервьюера", render: pageRepetition },
   history: { title: "История интервьюеров по волнам", render: pageHistory },
+  admin: { title: "Администрирование", render: pageAdmin },
 };
 
 function go(page) {
@@ -218,7 +224,15 @@ function renderSidebar() {
   sel.replaceChildren(...S.state.projects.map((p) => h("option", { value: p, selected: p === S.state.project }, p)));
   document.querySelectorAll("#nav a.needs-result").forEach((a) => a.classList.toggle("disabled", !S.result));
   $("#exportBtn").disabled = !S.result;
-  $("#sideFoot").textContent = `Версия ${S.state.app.version} · данные хранятся только на этом компьютере`;
+  $("#sideFoot").textContent = `Версия ${S.state.app.version}`;
+  const u = S.state.user || {};
+  document.body.classList.toggle("is-admin", u.role === "admin");
+  $("#userBox").replaceChildren(
+    h("div", { class: "who" }, u.name || u.login || ""),
+    h("div", { class: "team" }, u.role === "admin" ? "Администратор" : (u.team ? `Команда: ${u.team}` : "")),
+    h("div", { class: "row" },
+      h("button", { class: "btn small", onclick: changePassword }, "Пароль"),
+      h("button", { class: "btn small", onclick: logout }, "Выйти")));
 }
 
 async function refreshState() {
@@ -231,6 +245,7 @@ async function runChecks() {
     clearTimeout(saveTimer);
     S.result = await POST("/api/run", { config: S.state.config });
     await refreshState();
+    scheduleAuto();
     const s = S.result.summary;
     toast(`Проверено ${fmt(s.total)} анкет · брак ${fmt(s.defects)} (${fmt(s.defect_pct, 1)}%)`);
     go("overview");
@@ -251,11 +266,6 @@ async function exportReport(kind) {
 // ── Страница «Данные» ───────────────────────────────────────────────────────
 async function pageData(root) {
   const c = cfg();
-  const google = c.google || {};
-  const seg = h("div", { class: "segmented" },
-    ["file", "google"].map((m) => h("button", { class: S.sourceMode === m ? "on" : "", onclick: () => { S.sourceMode = m; go("data"); } },
-      m === "file" ? "Файл Excel" : "Google Sheets")));
-
   const fileInput = h("input", { type: "file", accept: ".xlsx,.xlsm,.xls", hidden: true, onchange: (e) => e.target.files[0] && upload(e.target.files[0]) });
   async function upload(file) {
     const fd = new FormData(); fd.append("file", file);
@@ -269,30 +279,10 @@ async function pageData(root) {
     h("b", {}, "Перетащите файл выгрузки сюда"),
     h("span", { class: "muted" }, "или нажмите, чтобы выбрать .xlsx на компьютере"), fileInput);
 
-  const urlInput = h("input", { type: "url", placeholder: "https://docs.google.com/spreadsheets/d/…", value: google.url || "", style: "flex:1" });
-  const keyInput = h("input", { type: "text", placeholder: "не нужен, если таблица открыта по ссылке", value: google.key_path || "", style: "flex:1" });
-  async function connect(thenRun) {
-    await guarded(async () => {
-      S.state = await POST("/api/source/google", { url: urlInput.value, key_path: keyInput.value });
-      S.result = null; renderSidebar();
-      toast("Данные из Google Sheets загружены");
-    }, "Загружаю из Google Sheets…");
-    if (thenRun && S.state.sheets.length) await runChecks(); else go("data");
-  }
-  const googleCard = h("div", {},
-    h("div", { class: "form-list" },
-      formRow("Ссылка на таблицу", "Вставьте один раз — дальше данные обновляются кнопкой", urlInput),
-      formRow("Ключ сервисного аккаунта", "Только для закрытых таблиц (JSON-файл из Google Cloud)", h("div", { class: "row", style: "flex:1" }, keyInput,
-        window.pywebview ? h("button", { class: "btn small", onclick: async () => { const p = await window.pywebview.api.pick_key_file(); if (p) keyInput.value = p; } }, "Выбрать…") : null))),
-    h("div", { class: "row", style: "margin-top:14px" },
-      h("button", { class: "btn", onclick: () => connect(false) }, google.url ? "Обновить данные" : "Подключить"),
-      h("button", { class: "btn primary", onclick: () => connect(true) }, svg('<path d="M6.5 4.5v11l9-5.5z"/>'), "Обновить и проверить")),
-    h("p", { class: "hint", style: "margin-top:14px" }, "Таблица читается напрямую у Google — никаких промежуточных серверов. Самый простой вариант: в Google Sheets «Настройки доступа → Все, у кого есть ссылка → Читатель»."));
-
+  root.append(teamSourcesCard());
   root.append(h("div", { class: "card" },
-    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Источник данных"),
-      h("p", { class: "hint" }, "Выгрузка анкет из Kobo Toolbox или любой другой системы. Сопоставление колонок одинаково работает для файла и для Google Sheets.")), seg),
-    S.sourceMode === "file" ? drop : googleCard));
+    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Или файл Excel"),
+      h("p", { class: "hint" }, "Разовая проверка выгрузки с компьютера — без подключения таблицы."))), drop));
 
   if (!S.state.sheets.length) return;
   root.append(h("div", { class: "card" },
@@ -672,6 +662,212 @@ async function pageHistory(root) {
     ], H.waves, { search: false })));
 }
 
+
+// ── Google-таблицы команды ──────────────────────────────────────────────────
+function teamSourcesCard() {
+  const c = cfg();
+  const all = S.state.remote_sources || [];
+  const chosen = new Set(c.remote_sources || []);
+  const list = h("div", { class: "src-list" });
+  const drawList = () => list.replaceChildren(...(all.length ? all.map((src) => h("label", { class: "src" },
+    h("input", { type: "checkbox", checked: chosen.has(src.id), onchange: (e) => { e.target.checked ? chosen.add(src.id) : chosen.delete(src.id); } }),
+    h("div", {}, h("div", {}, h("b", {}, src.name), " ", src.project ? h("span", { class: "tag" }, src.project) : null,
+      S.state.user.role === "admin" && src.team ? [" ", h("span", { class: "tag" }, `команда ${src.team}`)] : null),
+      h("div", { class: "meta" }, [src.sheet ? `лист «${src.sheet}»` : "первый лист", src.added_by && `добавил ${src.added_by}`].filter(Boolean).join(" · "))),
+    h("button", { class: "btn small danger", onclick: async (e) => {
+      e.preventDefault();
+      if (!confirm(`Отключить таблицу «${src.name}» от команды? Сами анкеты в Google Sheets не удалятся.`)) return;
+      await guarded(async () => { S.state.remote_sources = await POST("/api/remote/sources/delete", { id: src.id }); await refreshState(); go("data"); });
+    } }, "Отключить")))
+    : [h("div", { class: "empty" }, h("b", {}, "Таблиц пока нет"), "Добавьте ссылку на Google-таблицу, куда поступают анкеты вашего проекта.")]));
+  drawList();
+
+  async function load(thenRun) {
+    const ids = all.filter((x) => chosen.has(x.id)).map((x) => x.id);
+    await guarded(async () => {
+      S.state = await POST("/api/source/remote", { ids });
+      S.result = null; renderSidebar();
+      toast("Анкеты загружены из Google Sheets");
+    }, "Загружаю анкеты из Google Sheets…");
+    if (thenRun && S.state.sheets.length) await runChecks(); else go("data");
+  }
+
+  const name = h("input", { type: "text", placeholder: "Например: Ташкент — сентябрь", style: "flex:1;min-width:200px" });
+  const url = h("input", { type: "url", placeholder: "https://docs.google.com/spreadsheets/d/…", style: "flex:2;min-width:260px" });
+  const sheet = h("input", { type: "text", placeholder: "Лист (необязательно)", style: "width:170px" });
+  const email = S.state.server_email;
+  const addForm = h("div", { class: "block-card", style: "margin-top:16px" },
+    h("div", { class: "form-group-title", style: "margin-top:0" }, "Подключить ещё таблицу"),
+    h("ol", { class: "small muted", style: "margin:0 0 12px;padding-left:18px;line-height:1.7" },
+      h("li", {}, "Откройте Google-таблицу с анкетами → «Настройки доступа»."),
+      h("li", {}, "Добавьте ", email ? h("span", { class: "kbd" }, email) : "адрес сервера (его знает администратор)", " с правом «Читатель»."),
+      h("li", {}, "Вставьте ссылку на таблицу сюда и нажмите «Подключить».")),
+    h("div", { class: "row" }, name, url, sheet,
+      h("button", { class: "btn", onclick: async () => {
+        await guarded(async () => {
+          S.state.remote_sources = await POST("/api/remote/sources/add", { name: name.value, url: url.value, sheet: sheet.value });
+          const added = S.state.remote_sources.find((x) => x.name === name.value.trim());
+          if (added) { c.remote_sources = [...new Set([...(c.remote_sources || []), added.id])]; saveConfigSoon(); }
+          toast("Таблица подключена"); go("data");
+        }, "Проверяю доступ к таблице…");
+      } }, "Подключить")));
+
+  const freq = select([["0", "выключено"], ["5", "каждые 5 минут"], ["10", "каждые 10 минут"], ["15", "каждые 15 минут"], ["30", "каждые 30 минут"], ["60", "каждый час"]],
+    String(c.auto_refresh_min ?? 15), (v) => { c.auto_refresh_min = Number(v); saveConfigSoon(); scheduleAuto(); go("data"); });
+  const live = autoActive() ? h("span", { class: "live" }, S.lastRefresh ? `последнее обновление в ${S.lastRefresh}` : "включено")
+    : h("span", { class: "live off" }, (c.remote_sources || []).length ? "выключено" : "отметьте таблицы и нажмите «Загрузить»");
+
+  return h("div", { class: "card" },
+    h("div", { class: "card-head" },
+      h("div", {}, h("h2", {}, "Google-таблицы команды"),
+        h("p", { class: "hint" }, "Таблицы, куда поступают анкеты. Отметьте нужные для этого проекта — они объединятся в одну выгрузку с колонкой «Источник». Таблицы видит только ваша команда.")),
+      h("button", { class: "btn small ghost", onclick: async () => { await guarded(async () => { S.state.remote_sources = await GET("/api/remote/sources"); go("data"); }); } }, "Обновить список")),
+    list,
+    all.length ? h("div", { class: "row", style: "margin-top:14px" },
+      h("button", { class: "btn", onclick: () => load(false) }, "Загрузить"),
+      h("button", { class: "btn primary", onclick: () => load(true) }, svg('<path d="M6.5 4.5v11l9-5.5z"/>'), "Загрузить и проверить")) : null,
+    h("div", { class: "form-list", style: "margin-top:16px" },
+      formRow("Автоматическая проверка", "Приложение само забирает новые анкеты из отмеченных таблиц и перепроверяет всё, пока открыто", h("div", { class: "row" }, live, freq))),
+    addForm);
+}
+
+// ── Автообновление ─────────────────────────────────────────────────────────
+let autoTimer = null;
+function autoActive() {
+  const c = cfg();
+  return c.auto_refresh_min > 0 && (c.remote_sources || []).length > 0;
+}
+function scheduleAuto() {
+  clearInterval(autoTimer);
+  if (!autoActive()) return;
+  autoTimer = setInterval(autoRefresh, cfg().auto_refresh_min * 60 * 1000);
+}
+async function autoRefresh() {
+  if (!$("#busy").hidden || !$("#loginScreen").hidden) return;
+  try {
+    const r = await POST("/api/refresh");
+    S.result = r;
+    S.lastRefresh = r.refresh.at;
+    renderSidebar();
+    if (r.refresh.new) {
+      toast(`Новых анкет: ${fmt(r.refresh.new)}` + (r.refresh.new_defects ? ` · из них с браком: ${fmt(r.refresh.new_defects)}` : ""), r.refresh.new_defects > 0);
+    }
+    if ($("#modal").hidden && !["columns", "checks", "open", "rules", "admin"].includes(S.page)) go(S.page);
+  } catch (e) { /* ошибку покажет следующая ручная проверка; вход — через showLogin */ }
+}
+
+// ── Вход и выход ───────────────────────────────────────────────────────────
+function showLogin(message) {
+  clearInterval(autoTimer);
+  const scr = $("#loginScreen");
+  scr.hidden = false;
+  const err = $("#loginError");
+  err.hidden = !message;
+  err.textContent = message || "";
+  setTimeout(() => ($("#loginName").value ? $("#loginPass") : $("#loginName")).focus(), 50);
+}
+
+async function prepareLogin() {
+  const a = await GET("/api/auth");
+  $("#loginServer").value = a.server_url || "";
+  $("#serverBox").open = !a.server_url;
+  $("#loginName").value = a.last_login || "";
+  $("#loginFoot").textContent = `Версия ${a.app.version} · пароль выдаёт администратор`;
+  return a;
+}
+
+async function logout() {
+  await POST("/api/auth/logout");
+  S.result = null;
+  await prepareLogin();
+  $("#loginPass").value = "";
+  showLogin();
+}
+
+function changePassword() {
+  const oldP = h("input", { type: "password", autocomplete: "current-password" });
+  const newP = h("input", { type: "password", autocomplete: "new-password" });
+  const err = h("div", { class: "notice bad", hidden: true });
+  openModal("Сменить пароль", h("div", { style: "display:flex;flex-direction:column;gap:12px;max-width:360px" }, err,
+    h("label", { class: "field" }, h("span", {}, "Текущий пароль"), oldP),
+    h("label", { class: "field" }, h("span", {}, "Новый пароль (минимум 8 символов)"), newP),
+    h("button", { class: "btn primary", onclick: async () => {
+      try { await POST("/api/auth/password", { old_password: oldP.value, new_password: newP.value }); closeModal(); toast("Пароль изменён"); }
+      catch (e) { err.hidden = false; err.textContent = e.message; }
+    } }, "Сохранить")));
+}
+
+// ── Администрирование ───────────────────────────────────────────────────────
+function showPassword(login, password, title) {
+  openModal(title, h("div", {},
+    h("p", { class: "hint" }, `Передайте сотруднику логин и пароль. Пароль показывается один раз — после закрытия окна его не восстановить, только сбросить.`),
+    h("div", { class: "form-list" }, formRow("Логин", null, h("b", {}, login))),
+    h("div", { class: "password-box" }, password),
+    h("div", { class: "row" },
+      h("button", { class: "btn primary", onclick: async () => {
+        try { await navigator.clipboard.writeText(`Логин: ${login}\nПароль: ${password}`); toast("Скопировано"); } catch (e) { toast("Выделите пароль и скопируйте вручную", true); }
+      } }, "Скопировать логин и пароль"),
+      h("button", { class: "btn", onclick: closeModal }, "Готово"))));
+}
+
+async function pageAdmin(root) {
+  if ((S.state.user || {}).role !== "admin") return root.append(h("div", { class: "card" }, h("div", { class: "empty" }, "Раздел только для администратора.")));
+  const [{ users }, { log }] = await Promise.all([POST("/api/admin/list_users", {}), POST("/api/admin/log", { limit: 80 })]);
+  const teams = [...new Set(users.map((u) => u.team).filter(Boolean))].sort();
+  const act = (action, body, msg) => guarded(async () => { const r = await POST(`/api/admin/${action}`, body); if (msg) toast(msg); return r; });
+
+  const login = h("input", { type: "text", placeholder: "логин латиницей, напр. ali.k", style: "width:210px" });
+  const name = h("input", { type: "text", placeholder: "Имя и фамилия", style: "flex:1;min-width:180px" });
+  const team = h("input", { type: "text", placeholder: "Команда / проект", list: "teamsList", style: "width:200px" });
+  const role = select([["user", "Сотрудник"], ["admin", "Администратор"]], "user", () => {});
+  root.append(h("div", { class: "card" },
+    h("h2", {}, "Новый сотрудник"),
+    h("p", { class: "hint" }, "Пароль создаётся автоматически и показывается один раз. Команда определяет, какие Google-таблицы увидит сотрудник: у каждой команды свои."),
+    h("datalist", { id: "teamsList" }, teams.map((t) => h("option", { value: t }))),
+    h("div", { class: "row" }, login, name, team, role,
+      h("button", { class: "btn primary", onclick: async () => {
+        const r = await act("create_user", { login: login.value, name: name.value, team: team.value, role: role.value });
+        if (r && r.password) { showPassword(r.login, r.password, "Сотрудник создан"); go("admin"); }
+      } }, "Создать"))));
+
+  root.append(h("div", { class: "card" },
+    h("h2", {}, "Сотрудники"),
+    h("p", { class: "hint" }, "Выключите доступ — и программа у человека перестанет работать при следующем же обращении к серверу, даже если она сейчас открыта."),
+    table([
+      { key: "active", label: "Доступ", render: (u) => h("label", { class: "switch" },
+        h("input", { type: "checkbox", checked: u.active, disabled: u.login === S.state.user.login, onchange: async (e) => {
+          const r = await act("update_user", { login: u.login, active: e.target.checked }, e.target.checked ? "Доступ открыт" : "Доступ закрыт");
+          if (!r) e.target.checked = !e.target.checked;
+        } }), h("span")), sortVal: (u) => (u.active ? 1 : 0) },
+      { key: "login", label: "Логин" }, { key: "name", label: "Имя" },
+      { key: "team", label: "Команда", render: (u) => u.role === "admin" ? h("span", { class: "tag" }, "все команды") : h("span", {}, u.team || "—", " ",
+        h("button", { class: "btn small ghost", onclick: async () => {
+          const t = prompt(`Команда для ${u.login}`, u.team || "");
+          if (t !== null && await act("update_user", { login: u.login, team: t }, "Команда изменена")) go("admin");
+        } }, "изменить")) },
+      { key: "role", label: "Роль", render: (u) => u.role === "admin" ? h("span", { class: "pill plain neutral" }, "Администратор") : "Сотрудник" },
+      { key: "last_login", label: "Последний вход" },
+      { key: "actions", label: "", render: (u) => h("div", { class: "row" },
+        h("button", { class: "btn small", onclick: async () => {
+          if (!confirm(`Сбросить пароль ${u.login}? Старый перестанет работать.`)) return;
+          const r = await act("reset_password", { login: u.login });
+          if (r && r.password) showPassword(r.login, r.password, "Новый пароль");
+        } }, "Сбросить пароль"),
+        u.login === S.state.user.login ? null : h("button", { class: "btn small danger", onclick: async () => {
+          if (!confirm(`Удалить ${u.login}? Вход по этому логину станет невозможен.`)) return;
+          if (await act("delete_user", { login: u.login }, "Удалён")) go("admin");
+        } }, "Удалить")) },
+    ], users, { rowClass: (u) => (u.active ? "" : "row-RED") })));
+
+  root.append(h("div", { class: "card" }, h("h2", {}, "Журнал"),
+    h("p", { class: "hint" }, "Входы, неудачные попытки, подключение таблиц и действия администратора. Полный журнал — на листе «Журнал» в таблице сервера."),
+    table([{ key: "time", label: "Время" }, { key: "login", label: "Логин" },
+      { key: "action", label: "Действие", render: (x) => ({ login: "вход", login_failed: "неверный пароль", login_blocked: "вход заблокирован",
+        fetch: "загрузка анкет", add_source: "подключил таблицу", delete_source: "отключил таблицу", create_user: "создал сотрудника",
+        update_user: "изменил сотрудника", reset_password: "сбросил пароль", delete_user: "удалил сотрудника", change_password: "сменил пароль" })[x.action] || x.action },
+      { key: "detail", label: "Подробности", wrap: true }], log, { height: 420 })));
+}
+
 // ── Модальное окно ──────────────────────────────────────────────────────────
 function openModal(title, body) {
   $("#modalTitle").textContent = title;
@@ -681,6 +877,16 @@ function openModal(title, body) {
 function closeModal() { $("#modal").hidden = true; }
 
 // ── Старт ───────────────────────────────────────────────────────────────────
+async function enterApp() {
+  $("#loginScreen").hidden = true;
+  await refreshState();
+  S.result = null;
+  if (S.state.has_result) { try { S.result = await GET("/api/result"); } catch (e) { /* нет результата */ } }
+  renderSidebar();
+  scheduleAuto();
+  go(S.result ? "overview" : "data");
+}
+
 async function init() {
   document.querySelectorAll("#nav a").forEach((a) => a.addEventListener("click", () => go(a.dataset.page)));
   $("#runBtn").addEventListener("click", runChecks);
@@ -689,17 +895,28 @@ async function init() {
   $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
   $("#projectSelect").addEventListener("change", async (e) => {
-    await guarded(async () => { S.state = await POST("/api/project/open", { name: e.target.value }); S.result = null; renderSidebar(); go("data"); });
+    await guarded(async () => { S.state = await POST("/api/project/open", { name: e.target.value }); S.result = null; renderSidebar(); scheduleAuto(); go("data"); });
   });
   $("#newProjectBtn").addEventListener("click", async () => {
     const name = prompt("Название нового проекта (например: Uzum Bank — сентябрь)");
     if (!name) return;
-    await guarded(async () => { S.state = await POST("/api/project/open", { name }); S.result = null; renderSidebar(); go("data"); toast(`Проект «${name}» создан`); });
+    await guarded(async () => { S.state = await POST("/api/project/open", { name }); S.result = null; renderSidebar(); scheduleAuto(); go("data"); toast(`Проект «${name}» создан`); });
   });
-  await refreshState();
-  if (S.state.config.google && S.state.config.google.url) S.sourceMode = "google";
-  if (S.state.has_result) { try { S.result = await GET("/api/result"); } catch (e) { /* нет результата */ } }
-  renderSidebar();
-  go(S.result ? "overview" : "data");
+  $("#loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("#loginBtn");
+    btn.disabled = true; btn.textContent = "Вхожу…";
+    try {
+      await POST("/api/auth/login", { server_url: $("#loginServer").value, login: $("#loginName").value, password: $("#loginPass").value });
+      $("#loginPass").value = "";
+      await enterApp();
+    } catch (err) {
+      if ($("#loginScreen").hidden) return;
+      $("#loginError").hidden = false; $("#loginError").textContent = err.message;
+      if (/адрес|сервер|https/i.test(err.message)) $("#serverBox").open = true;
+    } finally { btn.disabled = false; btn.textContent = "Войти"; }
+  });
+  const a = await prepareLogin();
+  if (a.logged_in) await enterApp(); else showLogin();
 }
 init().catch((e) => toast(e.message, true));

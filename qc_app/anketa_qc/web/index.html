@@ -45,8 +45,11 @@
       <a data-page="repetition" class="needs-result"><i class="ico ico-repeat"></i>Повтор значения</a>
       <div class="nav-group">Между волнами</div>
       <a data-page="history"><i class="ico ico-history"></i>История</a>
+      <div class="nav-group admin-only">Владелец</div>
+      <a data-page="admin" class="admin-only"><i class="ico ico-key"></i>Администрирование</a>
     </nav>
 
+    <div class="user-box" id="userBox"></div>
     <div class="side-foot" id="sideFoot"></div>
   </aside>
 
@@ -69,6 +72,25 @@
     </header>
     <div class="content" id="content"></div>
   </main>
+</div>
+
+<div class="login-screen" id="loginScreen" hidden>
+  <form class="login-card" id="loginForm" autocomplete="on">
+    <div class="brand-mark big" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12 2.5l7.5 3v6c0 4.6-3.2 8.6-7.5 10-4.3-1.4-7.5-5.4-7.5-10v-6z"/><path class="tick" d="M8.3 12.2l2.6 2.6 4.9-5.2"/></svg>
+    </div>
+    <h1>Контроль качества анкет</h1>
+    <p class="muted">Войдите с логином, который выдал администратор</p>
+    <div class="notice bad" id="loginError" hidden></div>
+    <label class="field"><span>Логин</span><input type="text" id="loginName" autocomplete="username" required></label>
+    <label class="field"><span>Пароль</span><input type="password" id="loginPass" autocomplete="current-password" required></label>
+    <details id="serverBox">
+      <summary>Адрес сервера</summary>
+      <input type="url" id="loginServer" placeholder="https://script.google.com/macros/s/…/exec">
+    </details>
+    <button class="btn primary wide" type="submit" id="loginBtn">Войти</button>
+    <div class="login-foot" id="loginFoot"></div>
+  </form>
 </div>
 
 <div class="toast" id="toast" role="status"></div>

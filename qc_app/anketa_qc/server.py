@@ -11,6 +11,7 @@ import pandas as pd
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
 from . import APP_NAME, __version__, config, engine, export, sources
+from .remote import RemoteClient, RemoteError, combine
 from .history import Store
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -26,6 +27,16 @@ class Session:
         self.sheets = {}
         self.source_label = None
         self.result = None
+        # Вход через сервер доступа: без него приложение не работает.
+        self.client = None
+        self.user = None
+        self.sources = []
+        self.server_email = ""
+        self.seen_ids = None   # ID анкет на прошлой проверке — чтобы показать, сколько пришло новых
+
+    def logout(self):
+        self.client, self.user, self.sources, self.server_email = None, None, [], ""
+        self.sheets, self.source_label, self.result, self.seen_ids = {}, None, None, None
 
     # --- проект ------------------------------------------------------------
     def open_project(self, name):
@@ -140,7 +151,13 @@ def result_payload(sess):
     }
 
 
-def create_app(data_dir):
+# Без входа доступны только страница и сами запросы входа.
+OPEN_ENDPOINTS = {"/api/auth", "/api/auth/login"}
+# Какие действия администратора пропускаем на сервер доступа.
+ADMIN_ACTIONS = {"list_users", "create_user", "update_user", "reset_password", "delete_user", "log"}
+
+
+def create_app(data_dir, client_factory=RemoteClient):
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     sess = Session(Store(data_dir / "anketa_qc.db"))
@@ -154,6 +171,130 @@ def create_app(data_dir):
     @app.errorhandler(sources.SourceError)
     def _source_error(e):
         return fail(str(e))
+
+    @app.errorhandler(RemoteError)
+    def _remote_error(e):
+        if e.auth:   # сессия истекла, пользователя заблокировали или удалили
+            sess.logout()
+            return jsonify({"error": str(e), "auth": True}), 401
+        return fail(str(e))
+
+    @app.before_request
+    def require_login():
+        if request.path.startswith("/api/") and request.path not in OPEN_ENDPOINTS and sess.user is None:
+            return jsonify({"error": "Нужно войти", "auth": True}), 401
+        return None
+
+    def auth_payload():
+        return {"logged_in": sess.user is not None, "user": sess.user,
+                "server_url": sess.store.get_setting("server_url", ""),
+                "last_login": sess.store.get_setting("last_login", ""),
+                "app": {"name": APP_NAME, "version": __version__}}
+
+    @app.get("/api/auth")
+    def auth_status():
+        return jsonify(auth_payload())
+
+    @app.post("/api/auth/login")
+    def auth_login():
+        body = request.json or {}
+        url = (body.get("server_url") or "").strip()
+        client = client_factory(url)
+        data = client.login((body.get("login") or "").strip(), body.get("password") or "")
+        sess.client, sess.user, sess.sources = client, data["user"], data.get("sources", [])
+        sess.server_email = data.get("server_email", "")
+        sess.store.set_setting("server_url", url)
+        sess.store.set_setting("last_login", data["user"]["login"])
+        return jsonify(auth_payload())
+
+    @app.post("/api/auth/logout")
+    def auth_logout():
+        sess.logout()
+        return jsonify(auth_payload())
+
+    @app.post("/api/auth/password")
+    def auth_password():
+        body = request.json or {}
+        sess.client.call("change_password", old_password=body.get("old_password", ""),
+                         new_password=body.get("new_password", ""))
+        return jsonify({"ok": True})
+
+    def reload_sources():
+        sess.sources = sess.client.call("sources")["sources"]
+        return jsonify(sess.sources)
+
+    @app.get("/api/remote/sources")
+    def remote_sources():
+        return reload_sources()
+
+    @app.post("/api/remote/sources/add")
+    def remote_source_add():
+        body = request.json or {}
+        sess.client.call("add_source", name=body.get("name", ""), url=body.get("url", ""),
+                         sheet=body.get("sheet", ""), project=sess.project)
+        return reload_sources()
+
+    @app.post("/api/remote/sources/delete")
+    def remote_source_delete():
+        sid = (request.json or {}).get("id")
+        sess.client.call("delete_source", id=sid)
+        ids = [x for x in sess.config.get("remote_sources") or [] if x != sid]
+        sess.config["remote_sources"] = ids
+        sess.save_config()
+        return reload_sources()
+
+    def load_remote(ids):
+        frames = [sess.client.fetch_frame(i) for i in ids]
+        sheets = combine(frames)
+        if not sheets:
+            raise sources.SourceError("В выбранных источниках нет данных")
+        keep_sheet = sess.config.get("sheet")
+        sess.set_sheets(sheets, "Google Sheets: " + ", ".join(name for name, _ in frames))
+        # Лист сохраняется между обновлениями; при новом наборе — объединённый.
+        sess.config["sheet"] = keep_sheet if keep_sheet in sheets else next(iter(sheets))
+        sess.config["remote_sources"] = ids
+        sess.save_config()
+
+    @app.post("/api/source/remote")
+    def source_remote():
+        ids = (request.json or {}).get("ids") or []
+        if not ids:
+            return fail("Отметьте хотя бы одну таблицу")
+        load_remote(ids)
+        sess.seen_ids = None
+        return jsonify(state_payload())
+
+    @app.post("/api/refresh")
+    def refresh():
+        """Автообновление: заново забираем анкеты из таблиц проекта и
+        перепроверяем. Возвращает результат и сколько пришло новых анкет."""
+        ids = sess.config.get("remote_sources") or []
+        if not ids:
+            return fail("К проекту не подключены таблицы")
+        load_remote(ids)
+        df = sess.sheets.get(sess.config.get("sheet"))
+        fill_mapping(df)
+        missing = config.missing_required(sess.config["mapping"])
+        if missing or any(c and c not in df.columns for c in sess.config["mapping"].values()):
+            return fail("Колонки не сопоставлены — откройте «Колонки»")
+        sess.result = engine.run(df, sess.config)
+        rdf = sess.result["df"]
+        ids_now = set(rdf["row_id"])
+        new = [] if sess.seen_ids is None else sorted(ids_now - sess.seen_ids, key=str)
+        new_def = rdf[rdf["row_id"].isin(new) & rdf["is_defect"]]
+        sess.seen_ids = ids_now
+        payload = result_payload(sess)
+        payload["refresh"] = {"new": len(new), "new_defects": int(len(new_def)),
+                              "at": datetime.now().strftime("%H:%M")}
+        return jsonify(payload)
+
+    @app.post("/api/admin/<action>")
+    def admin(action):
+        if (sess.user or {}).get("role") != "admin":
+            return fail("Нужны права администратора", 403)
+        if action not in ADMIN_ACTIONS:
+            return fail("Неизвестное действие", 404)
+        return jsonify(sess.client.call(action, **(request.json or {})))
 
     @app.get("/")
     def index():
@@ -178,6 +319,9 @@ def create_app(data_dir):
             "suggested": config.suggest_mapping(cols, sess.config["mapping"]) if cols else {},
             "has_result": sess.result is not None,
             "waves": sess.store.list_waves(sess.project),
+            "user": sess.user,
+            "remote_sources": sess.sources,
+            "server_email": sess.server_email,
         }
 
     @app.get("/api/state")
@@ -216,16 +360,6 @@ def create_app(data_dir):
         sess.save_config()
         return jsonify(state_payload())
 
-    @app.post("/api/source/google")
-    def source_google():
-        body = request.json or {}
-        url = (body.get("url") or "").strip()
-        key = (body.get("key_path") or "").strip() or None
-        sess.set_sheets(sources.read_google(url, key), "Google Sheets")
-        sess.config["google"] = {"url": url, "key_path": key or ""}
-        sess.save_config()
-        return jsonify(state_payload())
-
     @app.post("/api/sheet")
     def pick_sheet():
         name = (request.json or {}).get("sheet")
@@ -243,6 +377,15 @@ def create_app(data_dir):
             return jsonify({"rows": [], "total": 0})
         return jsonify({"rows": _records(df.head(8).to_dict("records")), "total": len(df)})
 
+    def fill_mapping(df):
+        """Незаполненные роли колонок берём из подсказок — чтобы новый проект
+        (и автообновление) заработал без обязательного захода в «Колонки»."""
+        m = sess.config["mapping"]
+        for key, col in config.suggest_mapping(list(df.columns), m).items():
+            if not m.get(key) and col:
+                m[key] = col
+        sess.save_config()
+
     @app.post("/api/run")
     def run():
         body = request.json or {}
@@ -251,6 +394,7 @@ def create_app(data_dir):
         df = sess.sheets.get(sess.config.get("sheet"))
         if df is None:
             return fail("Сначала подключите данные: файл Excel или Google Sheets")
+        fill_mapping(df)
         missing = config.missing_required(sess.config["mapping"])
         if missing:
             return fail("Укажите колонки: " + ", ".join(missing))
@@ -258,6 +402,7 @@ def create_app(data_dir):
         if absent:
             return fail("В выбранном листе нет колонок: " + ", ".join(absent))
         sess.result = engine.run(df, sess.config)
+        sess.seen_ids = set(sess.result["df"]["row_id"])
         return jsonify(result_payload(sess))
 
     @app.get("/api/result")

@@ -8,7 +8,7 @@ a = Analysis(
     [str(ROOT / "run_app.py")],
     pathex=[str(ROOT)],
     datas=[(str(ROOT / "anketa_qc" / "web"), "anketa_qc/web")],
-    hiddenimports=["openpyxl", "gspread", "google.oauth2.service_account"],
+    hiddenimports=["openpyxl"],
     excludes=["tkinter", "matplotlib", "IPython", "streamlit", "pytest"],
     noarchive=False,
 )

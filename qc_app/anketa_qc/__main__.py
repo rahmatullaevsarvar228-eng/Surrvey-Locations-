@@ -67,11 +67,6 @@ class JsApi:
             f.write(data)
         return {"path": path}
 
-    def pick_key_file(self):
-        import webview
-        path = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("JSON (*.json)",))
-        return path[0] if path else None
-
 
 def selftest():
     """Проверка собранного exe без окна (для CI): поднимаем API и
@@ -80,7 +75,7 @@ def selftest():
     app = create_app(Path(tempfile.mkdtemp()))
     client = app.test_client()
     ok = client.get("/").status_code == 200 and client.get("/web/app.js").status_code == 200
-    ok = ok and client.get("/api/state").status_code == 200
+    ok = ok and client.get("/api/auth").status_code == 200
     # Загружаем ту же оконную часть, что и при обычном запуске (на Windows это
     # .NET через pythonnet) — именно она падала у файлов из скачанного zip.
     unblock_bundle()

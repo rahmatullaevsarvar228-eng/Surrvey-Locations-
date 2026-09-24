@@ -77,6 +77,8 @@ DEFAULT_CONFIG = {
         "yellow_pct": 50, "yellow_min_n": 5,
     },
     "status": {"red_pct": 50, "yellow_pct": 20},
+    "remote_sources": [],        # ID таблиц Google Sheets проекта на сервере доступа
+    "auto_refresh_min": 15,      # автообновление анкет из таблиц, 0 — выключено
 }
 
 
