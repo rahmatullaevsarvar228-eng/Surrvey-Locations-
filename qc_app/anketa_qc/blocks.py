@@ -111,10 +111,24 @@ def issue_block(code, text, cfg, sec_of):
 # Технические записи
 # ─────────────────────────────────────────────────────────────────────────
 TECH_HINTS = ("тех", "texn", "techn", "видео", "video", "фото", "photo", "задани", "vazifa", "topshiriq",
-              "съёмк", "съемк", "suratga", "ролик")
+              "топшир", "вазифа", "съёмк", "съемк", "suratga", "ролик", "task")
+# Короткие обозначения — только целым словом («тз» есть и внутри «отзыв»).
+TECH_TOKENS = {"тз", "т.з", "т.з.", "tz", "t.z", "t.z.", "ts"}
+MEDIA_EXT = re.compile(r"\.(mp4|mov|3gp|webm|avi|mkv|m4v)$", re.IGNORECASE)
+# Отдельный лист / таблица с техническими заданиями: программа ставит такой
+# отметку при объединении с анкетами.
+TECH_SHEET_COL = "Техническое задание (отдельный лист)"
 
 
-NAME_HINTS = ("тип", "type", "tur", "вид", "техн", "texn", "techn", "задани", "vazifa", "topshiriq",
+def is_tech_value(v):
+    s = str(v).strip().lower()
+    if any(h in s for h in TECH_HINTS):
+        return True
+    return any(t in TECH_TOKENS for t in re.split(r"[\s,;:()/«»\"'-]+", s))
+
+
+NAME_HINTS = ("тип", "type", "tur", "вид", "техн", "texn", "techn", "задани", "vazifa", "topshiriq", "топшир", "вазифа",
+              "анкета тури", "режим", "формат анкет",
               "запис", "формат", "video", "видео")
 # Колонка с файлом видео/фото по заданию: если заполнена — это техническая запись.
 MEDIA_NAME_HINTS = ("видео", "video", "техн", "texn", "задани", "vazifa", "topshiriq", "reklama yo", "нет рекламы")
@@ -139,13 +153,14 @@ def technical_candidates(raw):
         uniq = vals.value_counts()
         name_hint = any(h in name for h in NAME_HINTS)
         if 2 <= len(uniq) <= 8:
-            hits = [v for v in uniq.index if any(h in v.lower() for h in TECH_HINTS)]
+            hits = [v for v in uniq.index if is_tech_value(v)]
             if hits and len(hits) < len(uniq):
                 out.append({"col": str(c), "mode": "values", "values": hits, "n": int(uniq[hits].sum()),
                             "sure": name_hint, "score": int(uniq[hits].sum()) + (10_000 if name_hint else 0)})
                 continue
         share = len(vals) / n_rows
-        if any(h in name for h in MEDIA_NAME_HINTS) and 0 < share < 0.6 and len(uniq) > 0.5 * len(vals):
+        is_video = vals.map(lambda v: bool(MEDIA_EXT.search(v))).mean() > 0.8
+        if (any(h in name for h in MEDIA_NAME_HINTS) or is_video) and 0 < share < 0.6 and len(uniq) > 0.5 * len(vals):
             # почти все значения разные (имена файлов) и заполнено не у всех
             out.append({"col": str(c), "mode": "filled", "values": [], "n": int(len(vals)),
                         "sure": True, "score": int(len(vals)) + 5_000})
@@ -168,6 +183,21 @@ def resolve_technical(raw, cfg):
     видео в интернете» автоматически не берём — у неё нет признака в
     названии."""
     t = cfg.get("technical") or {}
+    # Технические задания с отдельного листа/таблицы — отмечены программой
+    extra = (raw[TECH_SHEET_COL].notna() if TECH_SHEET_COL in raw.columns
+             else pd.Series(False, index=raw.index)).astype(bool)
+    mask, info = _resolve_technical_col(raw, t)
+    if extra.any():
+        mask = mask | extra
+        info = dict(info or {}, n=int(mask.sum()), sheet_rows=int(extra.sum()))
+        info.setdefault("col", TECH_SHEET_COL)
+        info.setdefault("auto", True)
+        info.setdefault("mode", "sheet")
+        info.setdefault("values", [])
+    return mask, info
+
+
+def _resolve_technical_col(raw, t):
     col, mode = t.get("col"), t.get("mode") or "values"
     values = [str(v).strip().lower() for v in t.get("values") or [] if str(v).strip()]
     auto = False

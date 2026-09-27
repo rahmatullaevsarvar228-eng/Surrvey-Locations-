@@ -428,3 +428,33 @@ def test_rejected_by_monitoring_not_rechecked(cfg):
     cfg["rejected"] = {"col": None, "values": ["1"], "auto": False}
     codes = _codes(engine.run(df_in, cfg))
     assert "too_short" in codes["1000"] and "external" not in codes["1000"]
+
+
+def test_technical_detection_variants(cfg):
+    from anketa_qc import blocks
+    # «ТЗ» целым словом; «отзыв» (внутри есть «тз») — не ТЗ
+    df = pd.DataFrame({"Анкета тури": ["Сўровнома", "ТЗ", "Сўровнома", "ТЗ"],
+                       "Мнение": ["отзыв", "хорошо", "отзыв", "нет"]})
+    c = blocks.technical_candidates(df)
+    assert c[0]["col"] == "Анкета тури" and c[0]["values"] == ["ТЗ"] and c[0]["sure"]
+    assert all(x["col"] != "Мнение" for x in c)
+    # колонка с видеофайлом, заполненная у части записей
+    df = pd.DataFrame({"Q7": ["1695.mp4", None, None, "1702.mp4", None]})
+    c = blocks.technical_candidates(df)
+    assert c and c[0]["mode"] == "filled" and c[0]["sure"]
+
+
+def test_technical_rows_without_city_are_kept(cfg):
+    """ТЗ из отдельной формы: без города, но с устройством и временем —
+    нужно в цепочке, чтобы следующее интервью не стало «без перерыва»."""
+    from anketa_qc.blocks import TECH_SHEET_COL
+    rows = [make_row(0, "D1", "A", "2025-09-01 10:00:00", 15),
+            make_row(1, "D1", "A", "2025-09-01 10:15:30", 15)]
+    tech = make_row(9, "D1", "A", "2025-09-01 10:15:02", 0.3, city=None)
+    tech[TECH_SHEET_COL] = "да"
+    res = engine.run(pd.DataFrame(rows + [tech]), cfg)
+    codes = _codes(res)
+    assert not codes["1001"], codes["1001"]
+    assert res["df"]["technical"].sum() == 1 and res["technical_info"]["sheet_rows"] == 1
+    # без листа с ТЗ та же пара интервью — брак «нет перерыва»
+    assert "no_rest" in _codes(engine.run(pd.DataFrame(rows), cfg))["1001"]

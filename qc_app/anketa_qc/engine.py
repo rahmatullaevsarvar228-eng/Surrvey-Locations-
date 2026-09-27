@@ -239,7 +239,9 @@ def prepare(raw, cfg):
         df["completed"] = True
     df["completed"] &= ~df["technical"] & ~df["rejected"]   # техническая запись — не интервью; брак мониторинга не проверяем
 
-    keep = (df["deviceid"].notna() | df["inter"].notna()) & df["city"].notna()
+    # Техническое задание нужно в цепочке по времени на устройстве, даже если
+    # в его форме нет города (отдельная форма «ТЗ»).
+    keep = (df["deviceid"].notna() | df["inter"].notna()) & (df["city"].notna() | df["technical"])
     n_dropped = int((~keep).sum())
     df = df[keep].copy()
     raw = raw.loc[df.index].reset_index(drop=True)

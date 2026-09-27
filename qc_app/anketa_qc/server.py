@@ -37,11 +37,12 @@ class Session:
         self.decisions = {}
         self.source_names = {}
         self.source_tabs = {}   # {id источника: {"sheets": [...], "sheet": прочитанный лист}}
+        self.tech_frames = []   # технические задания с отдельных листов/таблиц Google
 
     def logout(self):
         self.client, self.user, self.sources, self.server_email = None, None, [], ""
         self.sheets, self.source_label, self.result, self.seen_ids = {}, None, None, None
-        self.decisions, self.source_names, self.source_tabs = {}, {}, {}
+        self.decisions, self.source_names, self.source_tabs, self.tech_frames = {}, {}, {}, []
 
     # --- решения по анкетам ------------------------------------------------
     def row_sources(self):
@@ -88,6 +89,23 @@ class Session:
         self.sheets, self.source_label, self.result = sheets, label, None
         if self.config.get("sheet") not in sheets:
             self.config["sheet"] = best_sheet(sheets)
+
+    def frame_for_run(self):
+        """Лист с анкетами + технические задания с отдельного листа или
+        таблицы (если указаны): они нужны, чтобы интервью сразу после ТЗ не
+        считалось «без перерыва»."""
+        from .blocks import TECH_SHEET_COL
+        df = self.sheets.get(self.config.get("sheet"))
+        if df is None:
+            return None
+        extra = list(self.tech_frames)
+        ts = self.config.get("tech_sheet")
+        if ts and ts in self.sheets and ts != self.config.get("sheet"):
+            extra.append(self.sheets[ts])
+        if not extra:
+            return df
+        parts = [df] + [x.assign(**{TECH_SHEET_COL: "да"}) for x in extra if len(x)]
+        return pd.concat(parts, ignore_index=True, sort=False)
 
     def columns(self):
         df = self.sheets.get(self.config.get("sheet"))
@@ -385,6 +403,21 @@ def create_app(data_dir, client_factory=RemoteClient):
 
     def load_remote(ids):
         tabs = sess.config.get("source_sheets") or {}
+        tech_tabs = sess.config.get("tech_tabs") or {}
+        tech_sources = [i for i in sess.config.get("tech_sources") or [] if i in ids]
+        all_ids = list(ids)
+        ids = [i for i in ids if i not in tech_sources] or ids
+        sess.tech_frames = []
+        for i in tech_sources:                     # целая таблица с ТЗ
+            if i not in ids:
+                sess.tech_frames.append(sess.client.fetch_frame(i, tabs.get(i))[2])
+        for i, tab in tech_tabs.items():           # лист с ТЗ в таблице с анкетами
+            if i in ids and tab:
+                try:
+                    sess.tech_frames.append(sess.client.fetch_frame(i, tab)[2])
+                except RemoteError as e:
+                    if e.auth:
+                        raise
         fetched = []
         for i in ids:
             try:
@@ -401,14 +434,16 @@ def create_app(data_dir, client_factory=RemoteClient):
             info = f[4] if len(f) > 4 else {}
             if tabs.get(f[0]) or _looks_like_anketas(f[2]) or not info.get("sheets"):
                 continue
+            best = None                          # из подходящих листов — где больше всего строк
             for tab in info["sheets"][:10]:
-                if tab == info.get("sheet"):
+                if tab == info.get("sheet") or tab == tech_tabs.get(f[0]):
                     continue
                 g = sess.client.fetch_frame(f[0], tab)
-                if _looks_like_anketas(g[2]):
-                    fetched[k] = g
-                    tabs[f[0]] = tab
-                    break
+                if _looks_like_anketas(g[2]) and (best is None or len(g[2]) > len(best[1][2])):
+                    best = (tab, g)
+            if best:
+                fetched[k] = best[1]
+                tabs[f[0]] = best[0]
         sess.config["source_sheets"] = tabs
         frames = [(f[1], f[2]) for f in fetched]
         sess.source_names = {f[0]: f[1] for f in fetched}
@@ -421,7 +456,7 @@ def create_app(data_dir, client_factory=RemoteClient):
         sess.set_sheets(sheets, "Google Sheets: " + ", ".join(name for name, _ in frames))
         # Лист сохраняется между обновлениями; при новом наборе — объединённый.
         sess.config["sheet"] = keep_sheet if keep_sheet in sheets else next(iter(sheets))
-        sess.config["remote_sources"] = ids
+        sess.config["remote_sources"] = all_ids
         sess.save_config()
 
     @app.post("/api/source/remote")
@@ -441,7 +476,7 @@ def create_app(data_dir, client_factory=RemoteClient):
         if not ids:
             return fail("К проекту не подключены таблицы")
         load_remote(ids)
-        df = sess.sheets.get(sess.config.get("sheet"))
+        df = sess.frame_for_run()
         fill_mapping(df)
         missing = config.missing_required(sess.config["mapping"])
         if missing or any(c and c not in df.columns for c in sess.config["mapping"].values()):
@@ -663,7 +698,7 @@ def create_app(data_dir, client_factory=RemoteClient):
         body = request.json or {}
         if body.get("config"):
             sess.save_config(body["config"])
-        df = sess.sheets.get(sess.config.get("sheet"))
+        df = sess.frame_for_run()
         if df is None:
             return fail("Сначала подключите данные: файл Excel или Google Sheets")
         fill_mapping(df)

@@ -137,12 +137,17 @@ def anketa_detail(result, cfg, pos, decision=None):
         values.append({"column": str(col), "value": engine.clean_str(v) if not isinstance(v, pd.Timestamp)
                        else v.strftime("%Y-%m-%d %H:%M:%S"), "highlight": col in highlight})
 
+    # Запись, которая была на этом устройстве прямо перед анкетой — чтобы
+    # руководитель видел, было ли это интервью или техническое задание.
     prev = None
-    if any(i["code"] in ("start_gap", "no_rest", "conveyor", "overlap", "mass_open") for i in issues) and pd.notna(row["deviceid"]):
-        same = df[(df["deviceid"] == row["deviceid"]) & (df["start"] < row["start"]) & ~df["technical"]].sort_values("start")
+    if pd.notna(row["deviceid"]) and pd.notna(row["start"]):
+        same = df[(df["deviceid"] == row["deviceid"]) & (df["start"] < row["start"])].sort_values("start")
         if len(same):
             p = same.iloc[-1]
-            prev = {"id": p["row_id"], "start": _fmt(p["start"]), "end": _fmt(p["end"])}
+            gap = (row["start"] - p["end"]).total_seconds() / 60 if pd.notna(p["end"]) else None
+            prev = {"id": p["row_id"], "start": _fmt(p["start"]), "end": _fmt(p["end"]),
+                    "kind": "техническое задание" if p["technical"] else "интервью",
+                    "technical": bool(p["technical"]), "gap_min": None if gap is None else round(gap, 1)}
     return {
         "id": row["row_id"], "city": row["city"], "region": row["region"], "inter": row["inter"],
         "device": row["deviceid"], "technical": bool(row["technical"]), "completed": bool(row["completed"]),

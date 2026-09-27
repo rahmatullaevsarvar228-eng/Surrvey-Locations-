@@ -510,3 +510,33 @@ def test_choose_sheet_of_google_table_and_best_excel_sheet(tmp_path, demo_bytes)
     st = client.post("/api/source/file", data={"file": (io.BytesIO(buf.getvalue()), "x.xlsx")},
                      content_type="multipart/form-data").get_json()
     assert st["config"]["sheet"] == "Лист1"
+
+
+def test_technical_tasks_on_separate_sheet(tmp_path):
+    """Интервью на одном листе, ТЗ — на другом (отдельная форма, без города):
+    интервью сразу после ТЗ не брак, если указать лист ТЗ."""
+    def row(i, start, minutes, **extra):
+        s = pd.Timestamp(start)
+        return {"_id": 7000 + i, "deviceid": "D1", "Код интервьюера": "Inter 01", "Город": "Ургенч",
+                "start": s.strftime("%Y-%m-%dT%H:%M:%S"),
+                "end": (s + pd.Timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S"), **extra}
+    interviews = pd.DataFrame([row(0, "2025-09-15 10:00:00", 15), row(1, "2025-09-15 10:16:10", 15)])
+    tz = pd.DataFrame([{k: v for k, v in row(9, "2025-09-15 10:15:10", 0.8).items() if k != "Город"}])
+    FakeClient.frames = {"Т": {"Анкеты": interviews, "ТЗ": tz}}
+    FakeClient.saved = {}
+    client = create_app(tmp_path, client_factory=FakeClient).test_client()
+    login(client, "boss")
+    state = client.post("/api/source/remote", json={"ids": ["Т"]}).get_json()
+    r = client.post("/api/run", json={}).get_json()
+    second = next(a for a in r["anketas"] if a["id"] == "7001")
+    assert any(i[0] == "no_rest" for i in second["issues"])        # ТЗ программа пока не видит
+    cfg = state["config"]
+    cfg["tech_tabs"] = {"Т": "ТЗ"}
+    client.post("/api/config", json={"config": cfg})
+    client.post("/api/source/remote", json={"ids": ["Т"]})
+    r = client.post("/api/run", json={}).get_json()
+    second = next(a for a in r["anketas"] if a["id"] == "7001")
+    assert not second["issues"] and r["summary"]["technical"] == 1 and r["summary"]["interviews"] == 2
+    # в окне анкеты видно, что перед ней было ТЗ
+    d = client.get(f"/api/anketa/{second['pos']}").get_json()
+    assert d["previous"]["technical"] and d["previous"]["kind"] == "техническое задание"

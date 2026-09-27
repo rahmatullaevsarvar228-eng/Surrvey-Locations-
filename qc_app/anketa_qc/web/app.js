@@ -373,10 +373,14 @@ async function pageData(root) {
   root.append(h("div", { class: "card" },
     h("div", { class: "card-head" },
       h("div", {}, h("h2", {}, "Какой лист проверять"), h("p", { class: "hint" }, `Источник: ${S.state.source}. В файлах часто много листов (свод, Pivot, мониторинг) — программа сама выбирает лист с анкетами, здесь можно выбрать другой.`)),
-      select(S.state.sheets, c.sheet, async (v) => {
-        const ok = await guarded(async () => { S.state = await POST("/api/sheet", { sheet: v }); S.result = null; renderSidebar(); return true; });
-        if (ok) { await runChecks(); if (!S.result) openSetup("columns"); }
-      })),
+      h("div", { class: "row" },
+        select(S.state.sheets, c.sheet, async (v) => {
+          const ok = await guarded(async () => { S.state = await POST("/api/sheet", { sheet: v }); S.result = null; renderSidebar(); return true; });
+          if (ok) { await runChecks(); if (!S.result) openSetup("columns"); }
+        }),
+        S.state.sheets.length > 1 && !(cfg().remote_sources || []).length ? h("label", { class: "row small", title: "Лист, где технические задания (видео, фото) заполняются отдельной формой" },
+          h("span", { class: "muted" }, "ТЗ:"),
+          select(S.state.sheets.filter((x) => x !== c.sheet), c.tech_sheet || "", async (v) => { c.tech_sheet = v || null; await flushConfig(); runChecks(true); }, "— нет —")) : null)),
     h("div", { id: "preview" }, h("div", { class: "muted" }, "Загружаю предпросмотр…"))));
   const pv = await GET("/api/preview");
   const cols = S.state.columns.slice(0, 14);
@@ -476,6 +480,8 @@ function pageForm(root) {
     h("h2", {}, "Технические записи"),
     h("p", { class: "hint" }, "Иногда интервьюер не проводит опрос, а выполняет задание: например, снимает видео, что поблизости нет рекламы. Такая запись не проверяется как интервью, не идёт в квоты и в норму. И главное: если интервьюер сразу после видео начал интервью — это не брак «нет перерыва». Место (GPS) у технических записей проверяется."),
     status,
+    h("p", { class: "muted small" }, "Если ТЗ заполняется отдельной формой — на другом листе или в другой таблице, — укажите этот лист в ",
+      h("a", { href: "#", onclick: (e) => { e.preventDefault(); go("data"); } }, "Источниках данных"), " (поле «ТЗ:» у таблицы или отметка «только ТЗ»)."),
     h("div", { class: "form-list" }, formRow("Выбрать колонку вручную", "«Тип записи» / «Вид задания» и значения, которые означают техническую запись",
       select(S.state.columns, t.col, (v) => { t.col = v; t.mode = "values"; t.values = []; if (!v) t.auto = true; saveConfigSoon(); go("form"); }, techAuto ? "— автоматически —" : "— не выбрано —"))),
     valuesBox));
@@ -787,13 +793,25 @@ function tabPicker(src) {
   if (!info.sheets || !info.sheets.length) {
     return h("span", { class: "muted small tab-pick", title: "Чтобы выбирать лист, администратору нужно обновить код сервера (Code.gs)" }, `лист «${current || "первый"}»`);
   }
-  return h("label", { class: "tab-pick", onclick: (e) => e.stopPropagation() }, h("span", { class: "muted small" }, "Лист:"),
-    select(info.sheets, current, async (v) => {
-      c.source_sheets[src.id] = v;
-      await flushConfig();
-      toast(`Проверяю лист «${v}»`);
-      refreshAll();
-    }));
+  c.tech_tabs = c.tech_tabs || {};
+  const others = info.sheets.filter((x) => x !== current);
+  return h("div", { class: "tab-pick", onclick: (e) => e.stopPropagation() },
+    h("label", {}, h("span", { class: "muted small" }, "Анкеты:"),
+      select(info.sheets, current, async (v) => {
+        c.source_sheets[src.id] = v;
+        if (c.tech_tabs[src.id] === v) delete c.tech_tabs[src.id];
+        await flushConfig();
+        toast(`Проверяю лист «${v}»`);
+        refreshAll();
+      })),
+    others.length ? h("label", { title: "Если технические задания (видео, фото) заполняются отдельной формой на другом листе — выберите его. Тогда интервью сразу после ТЗ не будет считаться «без перерыва»." },
+      h("span", { class: "muted small" }, "ТЗ:"),
+      select(others, c.tech_tabs[src.id] || "", async (v) => {
+        if (v) c.tech_tabs[src.id] = v; else delete c.tech_tabs[src.id];
+        await flushConfig();
+        toast(v ? `Технические задания — лист «${v}»` : "Отдельного листа с ТЗ нет");
+        refreshAll();
+      }, "— нет —")) : null);
 }
 
 function teamSourcesCard() {
@@ -809,6 +827,14 @@ function teamSourcesCard() {
       S.state.user.role === "admin" && src.team ? [" ", h("span", { class: "tag" }, `команда ${src.team}`)] : null),
       h("div", { class: "meta" }, [src.added_by && `добавил ${src.added_by}`].filter(Boolean).join(" · "))),
     tabPicker(src),
+    h("label", { class: "check small", title: "Отметьте, если в этой таблице только технические задания (видео, фото), а не интервью", onclick: (e) => e.stopPropagation() },
+      h("input", { type: "checkbox", checked: (cfg().tech_sources || []).includes(src.id), onchange: async (e) => {
+        const cc = cfg();
+        cc.tech_sources = (cc.tech_sources || []).filter((x) => x !== src.id);
+        if (e.target.checked) { cc.tech_sources.push(src.id); chosen.add(src.id); }
+        await flushConfig();
+        if (chosen.size) load(true);
+      } }), "только ТЗ"),
     h("button", { class: "btn small danger", onclick: async (e) => {
       e.preventDefault();
       if (!confirm(`Отключить таблицу «${src.name}» от команды? Сами анкеты в Google Sheets не удалятся.`)) return;
@@ -1285,7 +1311,12 @@ async function openAnketa(pos) {
       h("div", {}, i.text),
       h("div", { class: "l" }, "Логика: ", i.logic),
       i.columns.length ? h("div", { class: "cols" }, i.columns.map((c) => h("span", { class: "chip" }, h("span", {}, c)))) : null))),
-    d.previous ? h("div", { class: "notice info" }, `Предыдущая анкета на этом устройстве: ${d.previous.id}, ${d.previous.start} → ${d.previous.end}`) : null,
+    d.previous ? h("div", { class: "notice info" }, h("div", { style: "flex:1" },
+      h("b", {}, "Перед этой анкетой на устройстве: "), `${d.previous.kind} ${d.previous.id}, ${d.previous.start} → ${(d.previous.end || "—").slice(-8)}`,
+      d.previous.gap_min != null ? ` · перерыв ${d.previous.gap_min} мин` : "",
+      !d.previous.technical && d.issues.some((i) => ["no_rest", "start_gap", "overlap"].includes(i.code))
+        ? h("div", { class: "small", style: "margin-top:4px" }, "Если это было техническое задание (видео, фото), а программа считает его интервью, — покажите, как отличить ТЗ: ",
+          h("a", { href: "#", onclick: (e) => { e.preventDefault(); closeModal(); go("form"); } }, "Настройка проверки → Анкета"), ".") : null)) : null,
     d.lat != null && window.L ? h("div", {}, h("h3", {}, "Где сделана анкета"), anketaMap(a, d)) : null,
     h("div", { class: "row", style: "justify-content:space-between;margin:6px 0 10px" },
       h("h3", { style: "margin:0" }, "Исходная строка из таблицы"),
