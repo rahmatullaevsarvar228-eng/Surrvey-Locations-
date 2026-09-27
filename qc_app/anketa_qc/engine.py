@@ -49,6 +49,7 @@ ISSUE_LABELS = {
     "overlap": "Анкета открыта, когда предыдущая ещё не закончена",
     "mass_open": "Массовое открытие анкет за короткое время",
     "block_empty": "Обязательный блок не заполнен",
+    "external": "Брак, отмеченный вручную (аудиоконтроль / мониторинг)",
     "grid_same": "Во всём блоке-сетке один и тот же ответ",
 }
 
@@ -70,6 +71,7 @@ SHORT_LABELS = {
     "probe_depth": "Мало ответов в открытом вопросе",
     "probe_low_avg": "Слабый зондаж у интервьюера",
     "block_empty": "Пустой обязательный блок",
+    "external": "Брак по аудиоконтролю",
     "grid_same": "Одинаковые ответы в сетке",
     "no_gps": "Нет GPS",
     "geo_far": "Далеко от точки опроса",
@@ -102,7 +104,7 @@ STATUS_LEVELS = {
 # говорит о фальсификации. Балл анкеты = 100 × (1 − Π(1 − вес)) — несколько
 # слабых сигналов складываются, один сильный уже даёт высокий балл.
 RISK_WEIGHTS = {
-    "conveyor": 0.7, "geo_same": 0.7, "geo_city": 0.7, "overlap": 0.6, "mass_open": 0.6,
+    "external": 1.0, "conveyor": 0.7, "geo_same": 0.7, "geo_city": 0.7, "overlap": 0.6, "mass_open": 0.6,
     "block_empty": 0.5, "grid_same": 0.3, "geo_jump": 0.6, "dup_phone": 0.6,
     "no_device": 0.5, "too_short": 0.5, "start_gap": 0.4, "geo_far": 0.4, "no_rest": 0.35,
     "night": 0.3, "dup_name": 0.3, "probe_low_avg": 0.3, "geo_cluster": 0.3,
@@ -221,15 +223,21 @@ def prepare(raw, cfg):
     else:
         df["lat"] = df["lon"] = np.nan
 
-    from .blocks import resolve_technical
+    from .blocks import resolve_rejected, resolve_technical
     df["technical"], tech_info = resolve_technical(raw, cfg)
     df.attrs["technical_info"] = tech_info
+    # Брак, уже отмеченный вручную (группа мониторинга ставит «1»): такие
+    # анкеты больше не проверяются, а сразу считаются браком.
+    roles = {c for c in m.values() if c}
+    df["rejected"], rej_info = resolve_rejected(raw, cfg, skip=roles | ({tech_info["col"]} if tech_info else set()))
+    df["rejected"] &= ~df["technical"]
+    df.attrs["rejected_info"] = rej_info
     done_cols = [c for c in cfg.get("completed_cols") or [] if c in raw.columns]
     if done_cols:
         df["completed"] = (~raw[done_cols].apply(_is_blank)).any(axis=1)
     else:
         df["completed"] = True
-    df["completed"] &= ~df["technical"]     # техническая запись — не интервью
+    df["completed"] &= ~df["technical"] & ~df["rejected"]   # техническая запись — не интервью; брак мониторинга не проверяем
 
     keep = (df["deviceid"].notna() | df["inter"].notna()) & df["city"].notna()
     n_dropped = int((~keep).sum())
@@ -414,6 +422,7 @@ def normalize_name(v, answer_filter):
 def run(raw_input, cfg):
     t = cfg["thresholds"]
     df, raw, n_dropped = prepare(raw_input, cfg)
+    prepared_rej_info = df.attrs.get("rejected_info")
     probing = cfg["probing"]
     answer_filter = AnswerFilter(probing.get("invalid_exact", []), probing.get("invalid_substr", []))
 
@@ -431,8 +440,11 @@ def run(raw_input, cfg):
     df["region"] = df["city"].map(regions).fillna("—")
     issues = [[] for _ in range(len(df))]
 
+    rejected = df["rejected"].to_numpy()
+
     def add(mask, code, severity, text_fn):
-        for i in np.flatnonzero(np.asarray(mask, dtype=bool)):
+        # анкеты, уже забракованные мониторингом, не перепроверяем
+        for i in np.flatnonzero(np.asarray(mask, dtype=bool) & ~rejected):
             issues[i].append((code, severity, text_fn(i)))
 
     # --- Device ID ---------------------------------------------------------
@@ -638,6 +650,13 @@ def run(raw_input, cfg):
                 lambda i, n=sec["name"], cols=cols: f"блок «{n}»: во всех {int(n_filled[i])} вопросах один ответ "
                                                     f"«{next(clean_str(raw_sorted.at[i, c]) for c in cols if clean_str(raw_sorted.at[i, c]))}»")
 
+    # --- Брак, отмеченный вручную (мониторинг) --------------------------------
+    rej = prepared_rej_info
+    if rej:
+        for i in np.flatnonzero(rejected):
+            issues[i].append(("external", DEFECT, f"отмечена браком вручную: «{rej['col']}» = "
+                                                  f"{clean_str(raw_sorted.at[i, rej['col']]) or '1'}"))
+
     # --- Итог по анкетам -----------------------------------------------------
     sec_of = blk.section_of(sections)
     df["issues"] = issues
@@ -663,6 +682,7 @@ def run(raw_input, cfg):
         "blocks": [b.get("label") or f"Блок {i + 1}" for i, b in enumerate(blocks)],
         "sections": [{"name": s["name"], "n": len(s["columns"]), "auto": bool(s.get("auto"))} for s in sections],
         "technical_info": tech_info_of(df),
+        "rejected_info": prepared_rej_info,
         "interviewers": interviewers,
         "repetition": repetition,
         "geo": geo_result,

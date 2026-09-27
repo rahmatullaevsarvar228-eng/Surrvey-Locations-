@@ -113,6 +113,8 @@ def main(out):
                 row["_Координаты_latitude"] = lat
                 row["_Координаты_longitude"] = lon
                 row["_id"] = rid
+                # группа мониторинга прослушала запись и поставила «1» — брак
+                row["Брак (аудиоконтроль)"] = 1 if (inter_no == 13 and k in (3, 4, 5)) else None
                 rows.append(row)
     df = pd.DataFrame(rows)
     with pd.ExcelWriter(out) as w:

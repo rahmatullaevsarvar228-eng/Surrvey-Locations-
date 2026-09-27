@@ -400,3 +400,31 @@ def test_sections_blocks_required_and_grid(cfg):
     i = [c for c, _, _ in df.loc["1002", "issues"]].index("block_empty")
     assert df.loc["1002", "blocks"][i] == "Знание брендов"
     assert df.loc["1002", "primary"] == "block_empty"
+
+
+def test_rejected_by_monitoring_not_rechecked(cfg):
+    """Группа мониторинга поставила «1» — анкета уже брак: не перепроверяется,
+    одна причина «брак по аудиоконтролю», в завершённые (квоты, норма) не идёт."""
+    rows = [make_row(0, "D1", "A", "2025-09-01 10:00", 2),       # короткая, но уже отбракована
+            make_row(1, "D1", "A", "2025-09-01 10:30", 15),
+            make_row(2, "D2", "B", "2025-09-01 11:00", 15)]
+    rows[0]["Брак (аудио)"] = 1
+    rows[1]["Брак (аудио)"] = None
+    rows[2]["Брак (аудио)"] = 0
+    df_in = pd.DataFrame(rows)
+    from anketa_qc import blocks
+    assert blocks.rejected_candidates(df_in)[0]["col"] == "Брак (аудио)"
+    res = engine.run(df_in, cfg)
+    df = res["df"].set_index("row_id")
+    assert [c for c, _, _ in df.loc["1000", "issues"]] == ["external"]
+    assert df.loc["1000", "is_defect"] and df.loc["1000", "rejected"] and not df.loc["1000", "completed"]
+    assert not df.loc["1001", "issues"] and not df.loc["1002", "issues"]
+    assert res["rejected_info"]["n"] == 1 and res["rejected_info"]["auto"]
+    # колонка, где «1» у всех — не отметка брака
+    df_in["Брак (аудио)"] = 1
+    assert not blocks.rejected_candidates(df_in)
+    # выключили — снова обычная проверка
+    df_in["Брак (аудио)"] = [1, None, 0]
+    cfg["rejected"] = {"col": None, "values": ["1"], "auto": False}
+    codes = _codes(engine.run(df_in, cfg))
+    assert "too_short" in codes["1000"] and "external" not in codes["1000"]

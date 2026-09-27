@@ -372,8 +372,11 @@ async function pageData(root) {
   if (!S.state.sheets.length) return;
   root.append(h("div", { class: "card" },
     h("div", { class: "card-head" },
-      h("div", {}, h("h2", {}, "Лист с данными"), h("p", { class: "hint" }, `Источник: ${S.state.source}. В файлах часто есть вспомогательные листы (свод, Pivot) — выберите лист с анкетами.`)),
-      select(S.state.sheets, c.sheet, async (v) => { await guarded(async () => { S.state = await POST("/api/sheet", { sheet: v }); S.result = null; renderSidebar(); go("data"); }); })),
+      h("div", {}, h("h2", {}, "Какой лист проверять"), h("p", { class: "hint" }, `Источник: ${S.state.source}. В файлах часто много листов (свод, Pivot, мониторинг) — программа сама выбирает лист с анкетами, здесь можно выбрать другой.`)),
+      select(S.state.sheets, c.sheet, async (v) => {
+        const ok = await guarded(async () => { S.state = await POST("/api/sheet", { sheet: v }); S.result = null; renderSidebar(); return true; });
+        if (ok) { await runChecks(); if (!S.result) openSetup("columns"); }
+      })),
     h("div", { id: "preview" }, h("div", { class: "muted" }, "Загружаю предпросмотр…"))));
   const pv = await GET("/api/preview");
   const cols = S.state.columns.slice(0, 14);
@@ -400,6 +403,42 @@ function pageColumns(root) {
   root.append(h("div", { class: "card" }, h("h2", {}, "Какая колонка за что отвечает"),
     h("p", { class: "hint" }, "Частые названия колонок подставлены автоматически — проверьте и при необходимости выберите вручную. * — обязательные поля."),
     h("div", { class: "form-list" }, rows)));
+}
+
+// Брак, уже отмеченный вручную: группа мониторинга по аудиозаписи ставит «1».
+function rejectedCard() {
+  const c = cfg();
+  const r = c.rejected || (c.rejected = { col: null, values: ["1"], auto: true });
+  const hint = (S.state.rejected_hint || [])[0];
+  const auto = !r.col && r.auto !== false && hint;
+  const n = S.result && S.result.summary.rejected_info ? S.result.summary.rejected_info.n : (hint ? hint.n : 0);
+  const valuesBox = h("div", {});
+  async function drawValues() {
+    if (!r.col) return valuesBox.replaceChildren();
+    const vals = await GET(`/api/column/values?col=${encodeURIComponent(r.col)}`);
+    r.values = r.values && r.values.length ? r.values : ["1"];
+    valuesBox.replaceChildren(h("div", { class: "muted small", style: "margin:10px 0 6px" }, "Какие значения означают брак:"),
+      h("div", { class: "checks" }, vals.map((v) => h("label", { class: "check" },
+        h("input", { type: "checkbox", checked: r.values.map(String).includes(String(v.value).replace(/\.0$/, "")), onchange: (e) => {
+          const val = String(v.value).replace(/\.0$/, "");
+          r.values = e.target.checked ? [...new Set([...r.values, val])] : r.values.filter((x) => String(x) !== val); saveConfigSoon();
+        } }), h("span", {}, v.value), h("span", { class: "muted small" }, ` · ${fmt(v.n)}`)))));
+  }
+  drawValues();
+  const status = r.col
+    ? h("div", { class: "notice ok" }, h("div", { style: "flex:1" }, "Брак берётся из колонки ", h("b", {}, `«${r.col}»`), " — выбрано вручную."),
+      h("button", { class: "btn small", onclick: () => { r.col = null; r.values = ["1"]; r.auto = true; saveConfigSoon(); go(S.page); } }, "Вернуть автоматически"))
+    : auto ? h("div", { class: "notice ok" }, h("div", { style: "flex:1" }, "✓ Найдено автоматически: колонка ", h("b", {}, `«${hint.col}»`),
+        `, значение ${hint.values.map((v) => `«${v}»`).join(", ")} — ${fmt(n)} анкет уже отмечены браком. Ничего делать не нужно.`),
+      h("button", { class: "btn small", onclick: () => { r.auto = false; saveConfigSoon(); go(S.page); } }, "Это не отметка брака"))
+    : h("div", { class: "notice info" }, "Колонку с отметкой брака программа не нашла. Если группа мониторинга ставит «1» в какой-то колонке — выберите её ниже.");
+  return h("div", { class: "card" },
+    h("h2", {}, "Брак, отмеченный мониторингом"),
+    h("p", { class: "hint" }, "Группа мониторинга по аудиозаписи ставит «1» в анкетах, которые уже брак. Такие анкеты программа не перепроверяет: сразу считает браком с причиной «Брак по аудиоконтролю», не засчитывает в норму, квоты и чистую базу и не просит по ним решения."),
+    status,
+    h("div", { class: "form-list" }, formRow("Выбрать колонку вручную", "Колонка, где мониторинг отмечает брак",
+      select(S.state.columns, r.col, (v) => { r.col = v; r.values = ["1"]; if (!v) r.auto = true; saveConfigSoon(); go(S.page); }, auto ? "— автоматически —" : "— не выбрано —"))),
+    valuesBox);
 }
 
 // ── Шаг «Анкета»: технические записи, завершённость, блоки ───────────────────
@@ -441,6 +480,8 @@ function pageForm(root) {
       select(S.state.columns, t.col, (v) => { t.col = v; t.mode = "values"; t.values = []; if (!v) t.auto = true; saveConfigSoon(); go("form"); }, techAuto ? "— автоматически —" : "— не выбрано —"))),
     valuesBox));
   drawValues();
+
+  root.append(rejectedCard());
 
   root.append(h("div", { class: "card" }, h("h2", {}, "Признак завершённого интервью"),
     h("p", { class: "hint" }, "Колонки из конца анкеты (например ФИО или телефон респондента). Если хотя бы одна заполнена — интервью дошло до конца. Скринауты короткими быть обязаны, поэтому минимальная длительность, зондаж и обязательные блоки проверяются только у завершённых. Не выбрано — все анкеты считаются завершёнными."),
@@ -735,6 +776,26 @@ async function pageHistory(root) {
 
 
 // ── Google-таблицы команды ──────────────────────────────────────────────────
+// Какой лист таблицы проверять: в таблице бывает много листов (анкеты, свод,
+// мониторинг…). Список листов приходит с сервера после первой загрузки.
+function tabPicker(src) {
+  const c = cfg();
+  c.source_sheets = c.source_sheets || {};
+  const info = (S.state.source_tabs || {})[src.id];
+  const current = c.source_sheets[src.id] || (info && info.sheet) || src.sheet || "";
+  if (!info) return h("span", { class: "muted small tab-pick" }, current ? `лист «${current}»` : "лист по умолчанию");
+  if (!info.sheets || !info.sheets.length) {
+    return h("span", { class: "muted small tab-pick", title: "Чтобы выбирать лист, администратору нужно обновить код сервера (Code.gs)" }, `лист «${current || "первый"}»`);
+  }
+  return h("label", { class: "tab-pick", onclick: (e) => e.stopPropagation() }, h("span", { class: "muted small" }, "Лист:"),
+    select(info.sheets, current, async (v) => {
+      c.source_sheets[src.id] = v;
+      await flushConfig();
+      toast(`Проверяю лист «${v}»`);
+      refreshAll();
+    }));
+}
+
 function teamSourcesCard() {
   const c = cfg();
   const all = S.state.remote_sources || [];
@@ -746,7 +807,8 @@ function teamSourcesCard() {
     h("input", { type: "checkbox", checked: chosen.has(src.id), onchange: (e) => { e.target.checked ? chosen.add(src.id) : chosen.delete(src.id); } }),
     h("div", {}, h("div", {}, h("b", {}, src.name), " ", src.project ? h("span", { class: "tag" }, src.project) : null,
       S.state.user.role === "admin" && src.team ? [" ", h("span", { class: "tag" }, `команда ${src.team}`)] : null),
-      h("div", { class: "meta" }, [src.sheet ? `лист «${src.sheet}»` : "первый лист", src.added_by && `добавил ${src.added_by}`].filter(Boolean).join(" · "))),
+      h("div", { class: "meta" }, [src.added_by && `добавил ${src.added_by}`].filter(Boolean).join(" · "))),
+    tabPicker(src),
     h("button", { class: "btn small danger", onclick: async (e) => {
       e.preventDefault();
       if (!confirm(`Отключить таблицу «${src.name}» от команды? Сами анкеты в Google Sheets не удалятся.`)) return;
@@ -1088,7 +1150,7 @@ function backcheck() {
 function reviewFilters(rv) {
   const st = (a) => stateOf(a);
   const f = {
-    todo: ["Нужно решить", (a) => (a.defect || a.warning) && !a.decision && !a.technical],
+    todo: ["Нужно решить", (a) => (a.defect || a.warning) && !a.decision && !a.technical && !a.rejected],
     brak: ["Брак", (a) => st(a) === "brak"],
     warn: ["Проверить", (a) => st(a) === "warn"],
     ok: ["Норма", (a) => st(a) === "ok"],

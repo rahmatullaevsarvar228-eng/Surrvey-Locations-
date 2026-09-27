@@ -32,6 +32,7 @@ CODE_AREA = {
     "overlap": TIME, "mass_open": TIME, "night": TIME,
     "no_gps": GPS, "geo_far": GPS, "geo_cluster": GPS, "geo_same": GPS, "geo_jump": GPS, "geo_city": GPS,
     "probe_low_avg": OPEN,
+    "external": "Аудиоконтроль / мониторинг",
 }
 
 
@@ -187,3 +188,59 @@ def resolve_technical(raw, cfg):
 
 def technical_mask(raw, cfg):
     return resolve_technical(raw, cfg)[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Брак, уже отмеченный вручную (группа мониторинга по аудиозаписи и т.п.)
+# ─────────────────────────────────────────────────────────────────────────
+REJECT_NAME_HINTS = ("брак", "brak", "аудио", "audio", "мониторинг", "monitoring", "прослуш", "отк",
+                     "nuqson", "yaroqsiz", "reject")
+REJECT_YES = ("1", "да", "брак", "yes", "x", "х", "+", "true", "ha")
+REJECT_NO = ("0", "нет", "no", "-", "false", "yo'q", "yoq", "норма", "ок", "ok")
+
+
+def _norm_mark(v):
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    s = str(v).strip().lower()
+    return s[:-2] if s.endswith(".0") else s
+
+
+def rejected_candidates(raw, skip=()):
+    """Колонки, куда вручную ставят «1» = брак: в названии есть «брак»,
+    «аудио», «мониторинг»…, а значения — только 1/да/брак (и пусто/0/нет).
+    Помеченных меньше 60% — иначе это не отметка брака, а что-то другое."""
+    out = []
+    n_rows = max(len(raw), 1)
+    for c in raw.columns:
+        if c in skip:
+            continue
+        name = str(c).lower()
+        if not any(h in name for h in REJECT_NAME_HINTS):
+            continue
+        vals = raw[c].map(_norm_mark)
+        filled = vals[vals != ""]
+        if filled.empty:
+            continue
+        yes = filled[filled.isin(REJECT_YES)]
+        if yes.empty or not filled.isin(REJECT_YES + REJECT_NO).all() or len(yes) / n_rows >= 0.6:
+            continue
+        out.append({"col": str(c), "values": sorted(set(yes)), "n": int(len(yes))})
+    out.sort(key=lambda x: -x["n"])
+    return out
+
+
+def resolve_rejected(raw, cfg, skip=()):
+    """(маска анкет, уже забракованных вручную, описание или None)."""
+    r = cfg.get("rejected") or {}
+    col = r.get("col")
+    values = [_norm_mark(v) for v in r.get("values") or []] or list(REJECT_YES)
+    auto = False
+    if not col and r.get("auto", True):
+        cand = rejected_candidates(raw, skip)
+        if cand:
+            col, values, auto = cand[0]["col"], cand[0]["values"], True
+    if not col or col not in raw.columns:
+        return pd.Series(False, index=raw.index), None
+    mask = raw[col].map(_norm_mark).isin(values)
+    return mask.astype(bool), {"col": str(col), "values": values, "n": int(mask.sum()), "auto": auto}

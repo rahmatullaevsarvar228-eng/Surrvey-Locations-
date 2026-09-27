@@ -61,11 +61,18 @@ class RemoteClient:
         self.token = data["token"]
         return data
 
-    def fetch_frame(self, source_id):
-        """(id, название, таблица анкет, решения ОТК из листа «Решения ОТК»)."""
-        data = self.call("fetch", source_id=source_id)
+    def fetch_frame(self, source_id, sheet=None):
+        """(id, название, таблица анкет, решения ОТК из листа «Решения ОТК»,
+        {"sheets": листы таблицы, "sheet": какой прочитан}). Лист можно выбрать;
+        старый сервер параметр не знает — прочитает лист по умолчанию и не
+        вернёт список листов."""
+        params = {"source_id": source_id}
+        if sheet:
+            params["sheet"] = sheet
+        data = self.call("fetch", **params)
         return (data.get("id", source_id), data["name"],
-                rows_to_frame(data.get("columns") or [], data.get("rows") or []), data.get("decisions") or [])
+                rows_to_frame(data.get("columns") or [], data.get("rows") or []), data.get("decisions") or [],
+                {"sheets": data.get("sheets") or [], "sheet": data.get("sheet") or sheet or ""})
 
 
 def rows_to_frame(columns, rows):

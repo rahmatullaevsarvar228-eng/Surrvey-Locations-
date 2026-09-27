@@ -75,9 +75,16 @@ class FakeClient:
             return {"login": params["login"], "password": "Abc123xyz9"}
         return {"ok": True}
 
-    def fetch_frame(self, source_id):
+    def fetch_frame(self, source_id, sheet=None):
         self._check()
-        return source_id, source_id, self.frames[source_id], list(self.saved.get(source_id, {}).values())
+        book = self.frames[source_id]
+        if not isinstance(book, dict):
+            book = {"data": book}
+        name = sheet or next(iter(book))
+        if name not in book:
+            raise RemoteError(f"В источнике «{source_id}» нет листа «{name}»")
+        return (source_id, source_id, book[name], list(self.saved.get(source_id, {}).values()),
+                {"sheets": list(book), "sheet": name})
 
 
 def login(client, who="admin"):
@@ -465,3 +472,41 @@ def test_web_scripts_parse():
     for name in ("app.js", "dash.js"):
         r = subprocess.run([node, "--check", str(web / name)], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
+
+
+def test_choose_sheet_of_google_table_and_best_excel_sheet(tmp_path, demo_bytes):
+    data = pd.read_excel(io.BytesIO(demo_bytes), sheet_name="data")
+    FakeClient.frames = {"Т1": {"Свод": pd.DataFrame({"Город": ["Ташкент"], "Анкет": [5]}), "Анкеты": data}}
+    FakeClient.saved = {}
+    client = create_app(tmp_path, client_factory=FakeClient).test_client()
+    login(client, "boss")
+    # первый лист — свод без анкет: программа сама находит лист с анкетами и запоминает его
+    state = client.post("/api/source/remote", json={"ids": ["Т1"]}).get_json()
+    assert state["source_tabs"]["Т1"] == {"sheets": ["Свод", "Анкеты"], "sheet": "Анкеты"}
+    assert state["config"]["source_sheets"] == {"Т1": "Анкеты"} and "deviceid" in state["columns"]
+    # выбрать лист можно и вручную
+    cfg = state["config"]
+    cfg["source_sheets"] = {"Т1": "Свод"}
+    client.post("/api/config", json={"config": cfg})
+    state = client.post("/api/source/remote", json={"ids": ["Т1"]}).get_json()
+    assert state["source_tabs"]["Т1"]["sheet"] == "Свод" and "deviceid" not in state["columns"]
+    cfg = state["config"]
+    cfg["source_sheets"] = {"Т1": "Анкеты"}
+    client.post("/api/config", json={"config": cfg})
+    client.post("/api/source/remote", json={"ids": ["Т1"]})
+    r = client.post("/api/run", json={}).get_json()
+    s = r["summary"]
+    # «1» мониторинга: найдено само, не перепроверяется, в «нужно решить» не попадает
+    assert s["rejected"] == 3 and s["rejected_info"]["col"] == "Брак (аудиоконтроль)"
+    rej = [a for a in r["anketas"] if a["rejected"]]
+    assert all(a["defect"] and [i[0] for i in a["issues"]] == ["external"] for a in rej)
+    assert s["review"]["todo"] == sum(1 for a in r["anketas"] if (a["defect"] or a["warning"]) and not a["technical"]
+                                      and not a["rejected"])
+    # Excel с листом-сводом первым: программа сама берёт лист с анкетами
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf) as w:
+        pd.DataFrame({"Город": ["Ташкент"], "Анкет": [5]}).to_excel(w, sheet_name="Свод", index=False)
+        data.to_excel(w, sheet_name="Лист1", index=False)
+    st = client.post("/api/source/file", data={"file": (io.BytesIO(buf.getvalue()), "x.xlsx")},
+                     content_type="multipart/form-data").get_json()
+    assert st["config"]["sheet"] == "Лист1"

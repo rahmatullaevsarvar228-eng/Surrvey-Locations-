@@ -73,6 +73,9 @@ DEFAULT_CONFIG = {
     # Блоки анкеты: [{"name", "start": колонка, "required": bool, "grid": bool}].
     # Пусто — берутся группы Kobo из заголовков («grp/вопрос»).
     "sections": [],
+    # Брак, уже отмеченный вручную (группа мониторинга по аудио ставит «1»):
+    # колонка и значения; auto — найти колонку самому.
+    "rejected": {"col": None, "values": ["1"], "auto": True},
     "night": {"enabled": True, "work_start_hour": 7, "work_end_hour": 22, "severity": "warning"},
     "duplicates": {"phone_severity": "defect", "name_severity": "warning"},
     "probing": {
@@ -115,6 +118,7 @@ DEFAULT_CONFIG = {
     # team — список кодов интервьюеров, чтобы видеть и тех, кто ничего не прислал.
     "daily": {"min": 0, "team": []},
     "remote_sources": [],        # ID таблиц Google Sheets проекта на сервере доступа
+    "source_sheets": {},         # {ID таблицы: лист, который проверять}; пусто — лист по умолчанию
     "auto_refresh_min": 15,      # автообновление анкет из таблиц, 0 — выключено
 }
 

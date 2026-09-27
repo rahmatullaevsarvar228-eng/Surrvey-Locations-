@@ -36,11 +36,12 @@ class Session:
         # Решения руководителя: {(id источника, ID анкеты): {...}} и названия источников
         self.decisions = {}
         self.source_names = {}
+        self.source_tabs = {}   # {id источника: {"sheets": [...], "sheet": прочитанный лист}}
 
     def logout(self):
         self.client, self.user, self.sources, self.server_email = None, None, [], ""
         self.sheets, self.source_label, self.result, self.seen_ids = {}, None, None, None
-        self.decisions, self.source_names = {}, {}
+        self.decisions, self.source_names, self.source_tabs = {}, {}, {}
 
     # --- решения по анкетам ------------------------------------------------
     def row_sources(self):
@@ -86,7 +87,7 @@ class Session:
             raise sources.SourceError("В файле нет ни одного листа с данными")
         self.sheets, self.source_label, self.result = sheets, label, None
         if self.config.get("sheet") not in sheets:
-            self.config["sheet"] = "data" if "data" in sheets else next(iter(sheets))
+            self.config["sheet"] = best_sheet(sheets)
 
     def columns(self):
         df = self.sheets.get(self.config.get("sheet"))
@@ -150,6 +151,22 @@ class Session:
         raise ValueError(f"Неизвестный отчёт: {kind}")
 
 
+def _looks_like_anketas(df):
+    """Все обязательные колонки (устройство, старт, финиш, город, интервьюер) нашлись."""
+    found = config.suggest_mapping(list(df.columns))
+    return len(df) > 0 and all(found.get(k) for k in config.REQUIRED_ROLES)
+
+
+def best_sheet(sheets):
+    """Лист с анкетами среди многих (свод, Pivot, мониторинг…): тот, где
+    нашлось больше всего нужных колонок, при равенстве — где больше строк."""
+    def score(item):
+        name, df = item
+        found = sum(1 for k, c in config.suggest_mapping(list(df.columns)).items() if c and k in config.REQUIRED_ROLES)
+        return (found, name == "data", len(df))
+    return max(sheets.items(), key=score)[0]
+
+
 def _clean(v):
     if v is None:
         return None
@@ -206,7 +223,7 @@ def result_payload(sess):
         "defect": bool(x.is_defect), "warning": bool(x.is_warning),
         "reasons": x.reason_text, "warnings": x.warning_text,
         "risk": int(x.risk),
-        "technical": bool(x.technical), "completed": bool(x.completed), "region": x.region,
+        "technical": bool(x.technical), "rejected": bool(x.rejected), "completed": bool(x.completed), "region": x.region,
         "date": None if pd.isna(x.start) else x.start.strftime("%Y-%m-%d"),
         "hour": None if pd.isna(x.start) else int(x.start.hour),
         "lat": _clean(x.lat), "lon": _clean(x.lon),
@@ -229,6 +246,7 @@ def result_payload(sess):
         "summary": {
             "total": n, "interviews": n_iv, "technical": n_tech, "source_rows": n + r["n_dropped"],
             "technical_info": r.get("technical_info"),
+            "rejected": int(df["rejected"].sum()), "rejected_info": r.get("rejected_info"),
             "completed": int(df["completed"].sum()),
             "defects": n_def, "defect_pct": round(n_def / max(n_iv, 1) * 100, 1),
             "warnings": int(df["is_warning"].sum()),
@@ -241,7 +259,8 @@ def result_payload(sess):
             "review": {
                 "enabled": bool(sess.source_names) and bool(cfg["mapping"].get("id")),
                 "can_decide": (sess.user or {}).get("role") in ("lead", "admin"),
-                "todo": sum(1 for a in anketas if (a["defect"] or a["warning"]) and not a["decision"] and not a["technical"]),
+                "todo": sum(1 for a in anketas if (a["defect"] or a["warning"]) and not a["decision"] and not a["technical"]
+                            and not a["rejected"]),
                 **{d: sum(1 for a in anketas if a["decision"] == d) for d in review.DECISIONS},
             },
         },
@@ -365,10 +384,36 @@ def create_app(data_dir, client_factory=RemoteClient):
         return reload_sources()
 
     def load_remote(ids):
-        fetched = [sess.client.fetch_frame(i) for i in ids]
-        frames = [(name, df) for _, name, df, _ in fetched]
-        sess.source_names = {sid: name for sid, name, _, _ in fetched}
-        sess.decisions = {(sid, str(d["id"])): d for sid, _, _, decs in fetched for d in decs}
+        tabs = sess.config.get("source_sheets") or {}
+        fetched = []
+        for i in ids:
+            try:
+                fetched.append(sess.client.fetch_frame(i, tabs.get(i)))
+            except RemoteError as e:
+                if not tabs.get(i) or e.auth or "нет листа" not in str(e):
+                    raise
+                # выбранный лист удалили или переименовали — читаем лист по умолчанию
+                tabs.pop(i, None)
+                fetched.append(sess.client.fetch_frame(i))
+        # Лист не выбран, а в прочитанном по умолчанию нет анкет (свод, Pivot…) —
+        # сами пробуем другие листы таблицы и запоминаем первый подходящий.
+        for k, f in enumerate(fetched):
+            info = f[4] if len(f) > 4 else {}
+            if tabs.get(f[0]) or _looks_like_anketas(f[2]) or not info.get("sheets"):
+                continue
+            for tab in info["sheets"][:10]:
+                if tab == info.get("sheet"):
+                    continue
+                g = sess.client.fetch_frame(f[0], tab)
+                if _looks_like_anketas(g[2]):
+                    fetched[k] = g
+                    tabs[f[0]] = tab
+                    break
+        sess.config["source_sheets"] = tabs
+        frames = [(f[1], f[2]) for f in fetched]
+        sess.source_names = {f[0]: f[1] for f in fetched}
+        sess.source_tabs = {f[0]: (f[4] if len(f) > 4 else {}) for f in fetched}
+        sess.decisions = {(f[0], str(d["id"])): d for f in fetched for d in f[3]}
         sheets = combine(frames)
         if not sheets:
             raise sources.SourceError("В выбранных источниках нет данных")
@@ -482,11 +527,13 @@ def create_app(data_dir, client_factory=RemoteClient):
             "columns": cols,
             "suggested": config.suggest_mapping(cols, sess.config["mapping"]) if cols else {},
             "technical_hint": _technical_hint(sess),
+            "rejected_hint": _rejected_hint(sess),
             "sections_auto": _sections_auto(sess),
             "has_result": sess.result is not None,
             "waves": sess.store.list_waves(sess.project),
             "user": sess.user,
             "remote_sources": sess.sources,
+            "source_tabs": sess.source_tabs,
             "server_email": sess.server_email,
         }
 
@@ -501,7 +548,7 @@ def create_app(data_dir, client_factory=RemoteClient):
             return fail("Введите название проекта")
         sess.open_project(name)
         if sess.sheets and sess.config.get("sheet") not in sess.sheets:
-            sess.config["sheet"] = "data" if "data" in sess.sheets else next(iter(sess.sheets))
+            sess.config["sheet"] = best_sheet(sess.sheets)
         sess.save_config()
         return jsonify(state_payload())
 
@@ -680,6 +727,14 @@ def _technical_hint(sess):
     from .blocks import suggest_technical
     df = sess.sheets.get(sess.config.get("sheet"))
     return suggest_technical(df) if df is not None else []
+
+
+def _rejected_hint(sess):
+    from .blocks import rejected_candidates
+    df = sess.sheets.get(sess.config.get("sheet"))
+    if df is None:
+        return []
+    return rejected_candidates(df, skip={c for c in sess.config["mapping"].values() if c})[:3]
 
 
 def _sections_auto(sess):

@@ -61,7 +61,7 @@ function handle_(req) {
     case 'sources': return { sources: userSources_(me) };
     case 'add_source': return withLock_(function () { return addSource_(me, req); });
     case 'delete_source': return withLock_(function () { return deleteSource_(me, req.id); });
-    case 'fetch': return fetchSource_(me, req.source_id);
+    case 'fetch': return fetchSource_(me, req.source_id, req.sheet);
     case 'set_decisions': return withLock_(function () { return setDecisions_(me, req); });
     case 'change_password': return changePassword_(me, req.old_password, req.new_password);
   }
@@ -301,7 +301,7 @@ function serverEmail_() {
   try { return Session.getEffectiveUser().getEmail(); } catch (err) { return ''; }
 }
 
-function fetchSource_(me, sourceId) {
+function fetchSource_(me, sourceId, sheetOverride) {
   var src = null;
   var all = readRows_(SHEET_SOURCES, SOURCES_HEADER);
   for (var i = 0; i < all.length; i++) if (String(all[i].id) === String(sourceId)) src = all[i];
@@ -314,8 +314,13 @@ function fetchSource_(me, sourceId) {
     throw new Error('Сервер потерял доступ к таблице «' + src.name + '». Снова добавьте ' + serverEmail_() +
                     ' как «Читатель».');
   }
-  var sh = src.sheet ? ss.getSheetByName(src.sheet) : ss.getSheets()[0];
-  if (!sh) throw new Error('В источнике «' + src.name + '» нет листа «' + src.sheet + '»');
+  // Лист можно выбрать в программе (в таблице их бывает много); иначе —
+  // указанный при подключении или первый.
+  var tabs = ss.getSheets().map(function (x) { return x.getName(); })
+    .filter(function (n) { return n !== DECISIONS_SHEET; });
+  var want = String(sheetOverride || src.sheet || '').trim();
+  var sh = want ? ss.getSheetByName(want) : ss.getSheets()[0];
+  if (!sh) throw new Error('В источнике «' + src.name + '» нет листа «' + want + '»');
   var tz = ss.getSpreadsheetTimeZone();
   var values = sh.getDataRange().getValues();
   // Даты — строкой в часовом поясе таблицы (местное время), а не в UTC:
@@ -329,7 +334,7 @@ function fetchSource_(me, sourceId) {
   while (values.length > 1 && values[values.length - 1].join('') === '') values.pop();
   log_(me.login, 'fetch', src.name + ' (' + Math.max(values.length - 1, 0) + ' строк)');
   return { id: String(src.id), name: String(src.name), columns: values[0] || [], rows: values.slice(1),
-           decisions: readDecisions_(ss, tz) };
+           decisions: readDecisions_(ss, tz), sheets: tabs, sheet: sh.getName() };
 }
 
 // ── Решения ОТК (пишутся в ту же Google-таблицу, на отдельный лист) ────────

@@ -12,6 +12,7 @@ const unsigned = (arr) => Buffer.from(arr.map((b) => (b + 256) % 256));
 
 class Sheet {
   constructor(name, rows) { this.name = name; this.rows = rows || []; }
+  getName() { return this.name; }
   appendRow(r) { if (this.readonly) throw new Error("нет прав на запись"); this.rows.push(r.slice()); }
   setFrozenRows() {}
   getLastRow() { return this.rows.length; }
@@ -134,8 +135,14 @@ assert.deepStrictEqual(call({ action: "sources", token: u.token }).sources.map((
 assert.deepStrictEqual(call({ action: "sources", token: b.token }).sources.map((x) => x.name), ["Самарканд"]);
 assert.strictEqual(call({ action: "sources", token: T }).sources.length, 2, "админ видит все");
 
+env.external["AAA"].sheets.push(new Sheet("Мониторинг", [["ID", "Брак"], ["5001", 1]]));
 const f = call({ action: "fetch", token: u.token, source_id: s1.id });
 assert.deepStrictEqual(f.columns, ["start", "deviceid", "Город"]);
+assert.deepStrictEqual(f.sheets, ["data", "Мониторинг"], "список листов для выбора в программе");
+assert.strictEqual(f.sheet, "data");
+const f2 = call({ action: "fetch", token: u.token, source_id: s1.id, sheet: "Мониторинг" });
+assert.deepStrictEqual(f2.columns, ["ID", "Брак"], "другой лист по выбору в программе");
+assert.match(call({ action: "fetch", token: u.token, source_id: s1.id, sheet: "нет" }).error, /нет листа «нет»/);
 assert.strictEqual(f.rows.length, 1, "пустые хвостовые строки отброшены");
 assert.strictEqual(f.rows[0][0], "2025-09-16T02:30:00", "дата в местном времени таблицы");
 assert.match(call({ action: "fetch", token: u.token, source_id: s2.id }).error, /Нет доступа/);

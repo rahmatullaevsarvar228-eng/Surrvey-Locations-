@@ -825,7 +825,10 @@ function reconciliation() {
     h("b", {}, ok ? "✓ Сверка: " : "⚠ Сверка не сходится: "),
     parts.map(([t, n], i) => h("span", {}, i ? (n < 0 ? " − " : " + ") : "", h("b", {}, fmt(Math.abs(n))), ` ${t}`)),
     " = ", h("b", {}, fmt(c.iv)), " анкет = ",
-    h("span", { class: "t-brak" }, fmt(c.brak)), " брак + ", h("span", { class: "t-warnx" }, fmt(c.warn)), " проверить + ",
+    h("span", { class: "t-brak" }, fmt(c.brak)), " брак",
+    s.rejected ? h("span", { class: "muted" }, ` (из них ${fmt(s.rejected)} — отмечены мониторингом)`) : null, " + ", h("span", { class: "t-warnx" }, fmt(c.warn)), " проверить + ",
     h("span", { class: "t-okx" }, fmt(c.ok)), " норма.",
-    ti ? h("span", { class: "muted" }, ` Технические записи ${ti.auto ? "найдены автоматически" : "заданы"} по колонке «${ti.col}».`) : null);
+    ti ? h("span", { class: "muted" }, ` Технические записи ${ti.auto ? "найдены автоматически" : "заданы"} по колонке «${ti.col}».`) : null,
+    s.rejected_info ? h("span", { class: "muted" }, ` Брак мониторинга — колонка «${s.rejected_info.col}», не перепроверяется.`) : null,
+    s.sheet ? h("span", { class: "muted" }, ` Лист: «${s.sheet}».`) : null);
 }
