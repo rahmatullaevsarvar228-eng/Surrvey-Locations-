@@ -669,10 +669,13 @@ def run(raw_input, cfg):
             when = f", {df.at[j, 'start']:%d.%m %H:%M}" if pd.notna(df.at[j, "start"]) else ""
             return (f"совпадает {r * 100:.0f}% ответов ({n} вопросов) с анкетой {df.at[j, 'row_id']} "
                     f"(интервьюер {df.at[j, 'inter'] or '—'}{when})")
-        strong = qc.get("near_dup_defect_pct", 95) / 100      # почти полная копия — брак
-        add(df.index.isin([i for i, v in dup.items() if v[0] >= strong]), "near_dup", DEFECT, dup_text)
-        add(df.index.isin([i for i, v in dup.items() if v[0] < strong]), "near_dup", qc.get("near_dup_severity", WARNING),
-            dup_text)
+        # Почти полная копия своей же анкеты — брак. Совпадение с анкетой другого
+        # интервьюера — «проверить»: неизвестно, кто у кого списал, а честный
+        # «типичный» респондент может совпасть с анкетой, выдуманной «как у всех».
+        strong = qc.get("near_dup_defect_pct", 95) / 100
+        own = {i for i, (r, j, _) in dup.items() if r >= strong and df.at[i, "inter"] == df.at[j, "inter"]}
+        add(df.index.isin(list(own)), "near_dup", DEFECT, dup_text)
+        add(df.index.isin([i for i in dup if i not in own]), "near_dup", qc.get("near_dup_severity", WARNING), dup_text)
 
     fast, block_summary = quality.block_times(df, raw_sorted, cfg, qc.get("block_fast_pct", 25))
     add(df.index.isin(list(fast)), "block_fast", qc.get("block_severity", WARNING),
