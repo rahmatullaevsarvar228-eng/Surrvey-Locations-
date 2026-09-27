@@ -112,8 +112,11 @@ def issue_block(code, text, cfg, sec_of):
 # ─────────────────────────────────────────────────────────────────────────
 # Технические записи
 # ─────────────────────────────────────────────────────────────────────────
-TECH_HINTS = ("тех", "texn", "techn", "видео", "video", "фото", "photo", "задани", "vazifa", "topshiriq",
-              "топшир", "вазифа", "съёмк", "съемк", "suratga", "ролик", "task")
+# Значения, означающие техническую запись. Без голого «тех»/«texn» — иначе
+# профессия «Техник» в анкете стала бы техническим заданием.
+TECH_HINTS = ("техническ", "тех. зад", "тех.зад", "тех зад", "техзад", "texnik vazifa", "texnik topshiriq",
+              "technical", "задани", "vazifa", "topshiriq", "топшир", "вазифа", "видео", "video",
+              "съёмк", "съемк", "suratga", "ролик", "фотоотч", "фото отч")
 # Короткие обозначения — только целым словом («тз» есть и внутри «отзыв»).
 TECH_TOKENS = {"тз", "т.з", "т.з.", "tz", "t.z", "t.z.", "ts"}
 MEDIA_EXT = re.compile(r"\.(mp4|mov|3gp|webm|avi|mkv|m4v)$", re.IGNORECASE)
@@ -132,6 +135,12 @@ def is_tech_value(v):
 NAME_HINTS = ("тип", "type", "tur", "вид", "техн", "texn", "techn", "задани", "vazifa", "topshiriq", "топшир", "вазифа",
               "анкета тури", "режим", "формат анкет",
               "запис", "формат", "video", "видео")
+# Названия, по которым колонку можно взять автоматически, без вопроса:
+# явно служебные («Тип записи», «Вид работы», «Задание»…). По «Тип жилья» или
+# «Вид рекламы» — только подсказка.
+NAME_STRONG = ("тип запис", "тип анкет", "тип форм", "тип работ", "вид запис", "вид работ", "вид задан", "вид анкет",
+               "record type", "form type", "anketa turi", "анкета тури", "ish turi", "задани", "техническ",
+               "texnik", "vazifa", "topshiriq", "топшир", "вазифа", "режим")
 # Колонка с файлом видео/фото по заданию: если заполнена — это техническая запись.
 MEDIA_NAME_HINTS = ("видео", "video", "техн", "texn", "задани", "vazifa", "topshiriq", "reklama yo", "нет рекламы")
 
@@ -154,11 +163,12 @@ def technical_candidates(raw):
         vals = vals[vals != ""]
         uniq = vals.value_counts()
         name_hint = any(h in name for h in NAME_HINTS)
+        name_sure = any(h in name for h in NAME_STRONG) or bool(re.search(r"(^|[^а-яa-z])тз([^а-яa-z]|$)", name))
         if 2 <= len(uniq) <= 8:
             hits = [v for v in uniq.index if is_tech_value(v)]
             if hits and len(hits) < len(uniq):
                 out.append({"col": str(c), "mode": "values", "values": hits, "n": int(uniq[hits].sum()),
-                            "sure": name_hint, "score": int(uniq[hits].sum()) + (10_000 if name_hint else 0)})
+                            "sure": name_sure, "score": int(uniq[hits].sum()) + (10_000 if name_sure else 1_000 if name_hint else 0)})
                 continue
         share = len(vals) / n_rows
         is_video = vals.map(lambda v: bool(MEDIA_EXT.search(v))).mean() > 0.8
@@ -225,8 +235,14 @@ def technical_mask(raw, cfg):
 # ─────────────────────────────────────────────────────────────────────────
 # Брак, уже отмеченный вручную (группа мониторинга по аудиозаписи и т.п.)
 # ─────────────────────────────────────────────────────────────────────────
-REJECT_NAME_HINTS = ("брак", "brak", "аудио", "audio", "мониторинг", "monitoring", "прослуш", "отк",
-                     "nuqson", "yaroqsiz", "reject")
+# «брак» — но не «в браке»; «ОТК» — отдельным словом, не «отказ».
+REJECT_NAME_RE = re.compile(r"(брак(?!е|ом|а\b)|\bbrak|аудио|audio|мониторинг|monitoring|прослуш|(^|[^а-я])отк([^а-я]|$)|"
+                            r"nuqson|yaroqsiz|reject)", re.IGNORECASE)
+# Похоже на вопрос респонденту, а не на служебную отметку
+QUESTION_RE = re.compile(r"(\?|браке|замуж|женат|семейн|супруг|oila|turmush)", re.IGNORECASE)
+# Автоматически принимаем только явную отметку «1»/«брак»; «да» — нет:
+# «да» бывает ответом респондента.
+REJECT_AUTO_YES = ("1", "брак", "x", "х", "+")
 REJECT_YES = ("1", "да", "брак", "yes", "x", "х", "+", "true", "ha")
 REJECT_NO = ("0", "нет", "no", "-", "false", "yo'q", "yoq", "норма", "ок", "ok")
 
@@ -240,22 +256,24 @@ def _norm_mark(v):
 
 def rejected_candidates(raw, skip=()):
     """Колонки, куда вручную ставят «1» = брак: в названии есть «брак»,
-    «аудио», «мониторинг»…, а значения — только 1/да/брак (и пусто/0/нет).
-    Помеченных меньше 60% — иначе это не отметка брака, а что-то другое."""
+    «аудио», «мониторинг»… (но не вопрос вроде «Состоите ли вы в браке?»),
+    значения — только 1/брак (и пусто/0/нет), помечено меньше 30% анкет."""
     out = []
     n_rows = max(len(raw), 1)
     for c in raw.columns:
         if c in skip:
             continue
         name = str(c).lower()
-        if not any(h in name for h in REJECT_NAME_HINTS):
+        if not REJECT_NAME_RE.search(name) or QUESTION_RE.search(name):
             continue
         vals = raw[c].map(_norm_mark)
         filled = vals[vals != ""]
         if filled.empty:
             continue
-        yes = filled[filled.isin(REJECT_YES)]
-        if yes.empty or not filled.isin(REJECT_YES + REJECT_NO).all() or len(yes) / n_rows >= 0.6:
+        yes = filled[filled.isin(REJECT_AUTO_YES)]
+        # Мониторинг бракует меньшинство анкет; если «1» у трети и больше — это,
+        # скорее всего, ответ на вопрос («Брак зарегистрирован: 1/0»), а не отметка.
+        if yes.empty or not filled.isin(REJECT_YES + REJECT_NO).all() or len(yes) / n_rows >= 0.3:
             continue
         out.append({"col": str(c), "values": sorted(set(yes)), "n": int(len(yes))})
     out.sort(key=lambda x: -x["n"])

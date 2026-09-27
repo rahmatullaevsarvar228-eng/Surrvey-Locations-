@@ -408,8 +408,10 @@ def test_rejected_by_monitoring_not_rechecked(cfg):
     rows = [make_row(0, "D1", "A", "2025-09-01 10:00", 2),       # короткая, но уже отбракована
             make_row(1, "D1", "A", "2025-09-01 10:30", 15),
             make_row(2, "D2", "B", "2025-09-01 11:00", 15)]
+    rows += [make_row(3 + k, f"D{3 + k}", f"C{k}", "2025-09-01 12:00", 15) for k in range(5)]
+    for r in rows:
+        r["Брак (аудио)"] = None
     rows[0]["Брак (аудио)"] = 1
-    rows[1]["Брак (аудио)"] = None
     rows[2]["Брак (аудио)"] = 0
     df_in = pd.DataFrame(rows)
     from anketa_qc import blocks
@@ -424,7 +426,7 @@ def test_rejected_by_monitoring_not_rechecked(cfg):
     df_in["Брак (аудио)"] = 1
     assert not blocks.rejected_candidates(df_in)
     # выключили — снова обычная проверка
-    df_in["Брак (аудио)"] = [1, None, 0]
+    df_in["Брак (аудио)"] = [1, None, 0] + [None] * 5
     cfg["rejected"] = {"col": None, "values": ["1"], "auto": False}
     codes = _codes(engine.run(df_in, cfg))
     assert "too_short" in codes["1000"] and "external" not in codes["1000"]
@@ -512,3 +514,36 @@ def test_block_fast_and_answer_patterns(cfg):
     assert [b["block"] for b in res["block_times"]] == ["старт → t2", "t2 → t3", "t3 → финиш"]
     pats = {p["inter"] for p in res["answer_patterns"]}
     assert pats == {"I4"}, res["answer_patterns"]
+
+
+def test_no_false_alarms_on_real_kobo_like_columns(cfg):
+    """Вопросы анкеты, похожие на служебные отметки, не должны включать
+    автоопределение: «Состоите ли вы в браке? Да» — не брак мониторинга,
+    профессия «Техник» — не техническое задание, варианты 0/1 одного вопроса
+    и колонка «Страна» — не делают анкеты «копиями»."""
+    import random
+    from anketa_qc import blocks
+    rnd = random.Random(1)
+    rows = []
+    for k in range(300):
+        r = make_row(k, f"D{k % 10}", f"I{k % 10}", f"2025-09-0{1 + (k // 10) // 12} {9 + (k // 10) % 12}:00", 20)
+        r["Состоите ли вы в браке?"] = rnd.choice(["Да", "Нет"])
+        r["Брак зарегистрирован"] = rnd.choice(["1", "0"])                  # вопрос, а не отметка мониторинга
+        r["Вид деятельности"] = rnd.choice(["Техник", "Учитель", "Врач", "Студент"])
+        r["Причина отказа"] = rnd.choice([None, "нет времени"])
+        r["Страна"] = "Узбекистан"
+        chosen = set(rnd.sample(range(25), 2))
+        for o in range(25):
+            r[f"Q5/opt{o}"] = 1 if o in chosen else 0
+        for q in range(20):
+            r[f"Q{10 + q}"] = rnd.choice(["Да", "Нет", "Не знаю"])
+        rows.append(r)
+    df_in = pd.DataFrame(rows)
+    assert not [c for c in blocks.technical_candidates(df_in) if c["sure"]]
+    assert all(c["col"] not in ("Состоите ли вы в браке?", "Причина отказа") for c in blocks.rejected_candidates(df_in))
+    res = engine.run(df_in, cfg)
+    df = res["df"]
+    assert not df["technical"].any()
+    assert not df["rejected"].any()                         # «Брак зарегистрирован» 1/0 — ответ, не отметка
+    assert not df["issues"].map(lambda xs: any(c == "near_dup" for c, _, _ in xs)).any()
+    assert not res["answer_patterns"]
