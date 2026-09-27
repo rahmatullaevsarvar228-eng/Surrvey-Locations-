@@ -127,7 +127,7 @@ def compute(result, cfg, decisions_by_pos):
     return {
         "enabled": True, "labels": labels, "rows": rows,
         "outside_plan": sorted(extra, key=lambda r: -r["total"]),
-        "summary": {"plan": total_plan, "ok": sum(r["Засчитано"] for r in rows),
+        "summary": {"plan": total_plan, "ok": sum(r["Засчитано"] for r in rows), "ok_in_plan": total_ok,
                     "left": sum(r["Осталось"] for r in rows), "over": sum(r["Перебор"] for r in rows),
                     "pct": round(total_ok / total_plan * 100) if total_plan else 0,
                     "cells_done": sum(1 for r in rows if r["Статус"] == "GREEN"), "cells": len(rows)},

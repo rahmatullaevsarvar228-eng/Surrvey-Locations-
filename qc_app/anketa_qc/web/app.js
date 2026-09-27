@@ -214,30 +214,57 @@ function needData() {
 }
 
 // ── Навигация ──────────────────────────────────────────────────────────────
+// Шаги мастера настройки: каждая страница настройки — шаг, их видно сверху.
+const SETUP_STEPS = [
+  ["columns", "Колонки", "Какая колонка за что отвечает", pageColumns],
+  ["form", "Анкета", "Блоки анкеты, технические записи, завершённость", pageForm],
+  ["checks", "Проверки", "Пороги времени, дубликаты, статусы", pageChecks],
+  ["open", "Открытые вопросы", "Зондаж «А ещё?» и повтор значения", pageOpen],
+  ["rules", "Логика", "Правила «если … то …»", pageRules],
+  ["gps", "GPS", "Точки опроса, радиусы, город", pageGps],
+  ["quotaSetup", "Квоты", "План выборки", pageQuotaSetup],
+];
 const PAGES = {
-  data: { title: "Данные", render: pageData },
-  columns: { title: "Колонки", render: pageColumns },
-  checks: { title: "Пороги проверок", render: pageChecks },
-  open: { title: "Открытые вопросы", render: pageOpen },
-  rules: { title: "Логические правила", render: pageRules },
-  overview: { title: "Обзор", render: pageOverview },
+  data: { title: "Подключение данных", render: pageData },
+  overview: { title: "Главная", render: pageOverview },
+  defects: { title: "Брак: где и почему", render: pageDefects },
+  map: { title: "Карта GPS", render: pageMap },
   interviewers: { title: "Интервьюеры", render: pageInterviewers },
-  anketas: { title: "Анкеты", render: pageAnketas },
-  cities: { title: "Города", render: pageCities },
+  quotas: { title: "Выполнение квот", render: pageQuotas },
+  review: { title: "Проверка анкет", render: pageReview },
+  anketas: { title: "Все анкеты", render: pageAnketas },
   answers: { title: "Ответы в открытых вопросах", render: pageAnswers },
   repetition: { title: "Повтор значения у интервьюера", render: pageRepetition },
   history: { title: "История интервьюеров по волнам", render: pageHistory },
   admin: { title: "Администрирование", render: pageAdmin },
-  review: { title: "Проверка анкет", render: pageReview },
-  quotaSetup: { title: "Квоты выборки", render: pageQuotaSetup },
-  quotas: { title: "Выполнение квот", render: pageQuotas },
-  gps: { title: "GPS-контроль", render: pageGps },
-  map: { title: "Карта GPS", render: pageMap },
 };
+for (const [key, , , render] of SETUP_STEPS) PAGES[key] = { title: "Настройка проверки", render: (root) => renderSetup(root, key, render), setup: true };
+function openSetup(step) { go(step || S.setupStep || "columns"); }
+
+function renderSetup(root, key, render) {
+  S.setupStep = key;
+  const idx = SETUP_STEPS.findIndex((x) => x[0] === key);
+  root.append(h("div", { class: "stepper" }, SETUP_STEPS.map(([k, t, d], i) =>
+    h("button", { class: `step ${k === key ? "on" : ""} ${i < idx ? "done" : ""}`, onclick: () => go(k) },
+      h("span", { class: "step-n" }, i + 1), h("span", {}, h("b", {}, t), h("span", { class: "step-d" }, d))))));
+  const body = h("div", {});
+  root.append(body);
+  const r = render(body);
+  const next = SETUP_STEPS[idx + 1];
+  root.append(h("div", { class: "row step-nav" },
+    idx > 0 ? h("button", { class: "btn", onclick: () => go(SETUP_STEPS[idx - 1][0]) }, `← ${SETUP_STEPS[idx - 1][1]}`) : null,
+    h("span", { class: "spacer" }),
+    next ? h("button", { class: "btn primary", onclick: () => go(next[0]) }, `Дальше: ${next[1]} →`)
+      : h("button", { class: "btn primary", onclick: runChecks }, "Готово — проверить анкеты")));
+  return r;
+}
 
 function go(page) {
+  if (!PAGES[page]) page = S.result ? "overview" : "data";
   S.page = page;
-  document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
+  const navKey = PAGES[page].setup ? "setup" : page;
+  document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === navKey));
+  untip();
   $("#pageTitle").textContent = PAGES[page].title;
   const r = S.result && S.result.summary;
   $("#pageSub").textContent = r ? [r.source, r.sheet && `лист «${r.sheet}»`, r.period, `проверено ${r.processed_at}`].filter(Boolean).join("  ·  ")
@@ -254,6 +281,7 @@ function renderSidebar() {
   sel.replaceChildren(...S.state.projects.map((p) => h("option", { value: p, selected: p === S.state.project }, p)));
   document.querySelectorAll("#nav a.needs-result").forEach((a) => a.classList.toggle("disabled", !S.result));
   $("#exportBtn").disabled = !S.result;
+  $("#wordBtn").disabled = !S.result;
   const rv = S.result && S.result.summary.review;
   $("#reviewBadge").textContent = rv && rv.enabled && rv.todo ? (rv.todo > 999 ? "999+" : rv.todo) : "";
   $("#sideFoot").textContent = `Версия ${S.state.app.version}`;
@@ -280,19 +308,24 @@ async function runChecks() {
     await refreshState();
     scheduleAuto();
     const s = S.result.summary;
-    toast(`Проверено ${fmt(s.total)} анкет · брак ${fmt(s.defects)} (${fmt(s.defect_pct, 1)}%)`);
+    toast(`Проверено ${fmt(s.interviews)} анкет · брак ${fmt(s.defects)} (${fmt(s.defect_pct, 1)}%)`);
     go("overview");
   }, "Проверяю анкеты…");
 }
 
 async function exportReport(kind) {
+  // Отчёт Word строится по текущим фильтрам дашборда (регион, город, интервьюер)
+  const f = kind === "word" ? Object.fromEntries(Object.entries(S.f || {}).filter(([k, v]) => v && k !== "date")) : {};
   if (window.pywebview && window.pywebview.api) {
-    const r = await window.pywebview.api.save_export(kind);
+    busy(true, "Готовлю отчёт…");
+    let r;
+    try { r = await window.pywebview.api.save_export(kind, f); } finally { busy(false); }
     if (r && r.error) toast(r.error, true);
     else if (r && r.path) toast(`Сохранено: ${r.path}`);
     return;
   }
-  const a = h("a", { href: `/api/export/${kind}` });
+  const qs = new URLSearchParams(f).toString();
+  const a = h("a", { href: `/api/export/${kind}${qs ? "?" + qs : ""}` });
   document.body.append(a); a.click(); a.remove();
 }
 
@@ -328,7 +361,7 @@ async function pageData(root) {
   $("#preview").replaceChildren(
     h("p", { class: "muted small" }, `${fmt(pv.total)} строк · ${fmt(S.state.columns.length)} колонок. Первые строки:`),
     table(cols.map((k) => ({ key: k, label: k.length > 32 ? k.slice(0, 30) + "…" : k })), pv.rows, { search: false, height: 320 }),
-    h("div", { class: "row", style: "margin-top:16px" }, h("button", { class: "btn primary", onclick: () => go("columns") }, "Дальше: колонки →")));
+    h("div", { class: "row", style: "margin-top:16px" }, h("button", { class: "btn primary", onclick: () => go("columns") }, "Дальше: настройка проверки →")));
 }
 
 // ── Страница «Колонки» ──────────────────────────────────────────────────────
@@ -348,9 +381,65 @@ function pageColumns(root) {
   root.append(h("div", { class: "card" }, h("h2", {}, "Какая колонка за что отвечает"),
     h("p", { class: "hint" }, "Частые названия колонок подставлены автоматически — проверьте и при необходимости выберите вручную. * — обязательные поля."),
     h("div", { class: "form-list" }, rows)));
+}
+
+// ── Шаг «Анкета»: технические записи, завершённость, блоки ───────────────────
+function pageForm(root) {
+  if (!S.state.sheets.length) return root.append(needData());
+  const c = cfg();
+  c.technical = c.technical || { col: null, values: [] };
+  c.sections = c.sections || [];
+  const t = c.technical;
+
+  const valuesBox = h("div", {});
+  async function drawValues() {
+    valuesBox.replaceChildren();
+    if (!t.col) return;
+    const vals = await GET(`/api/column/values?col=${encodeURIComponent(t.col)}`);
+    valuesBox.replaceChildren(h("div", { class: "muted small", style: "margin:10px 0 6px" }, "Отметьте значения, которые означают техническую запись:"),
+      h("div", { class: "checks" }, vals.map((v) => h("label", { class: "check" },
+        h("input", { type: "checkbox", checked: t.values.includes(v.value), onchange: (e) => {
+          t.values = e.target.checked ? [...new Set([...t.values, v.value])] : t.values.filter((x) => x !== v.value); saveConfigSoon();
+        } }), h("span", {}, v.value), h("span", { class: "muted small" }, ` · ${fmt(v.n)}`)))));
+  }
+  const hint = (S.state.technical_hint || [])[0];
+  const same = hint && t.col === hint.col && hint.values.every((v) => t.values.includes(v));
+  root.append(h("div", { class: "card" },
+    h("h2", {}, "Технические записи"),
+    h("p", { class: "hint" }, "Иногда интервьюер не проводит опрос, а выполняет задание: например, снимает видео, что поблизости нет рекламы. Такая запись короткая и идёт сразу за интервью — без этой настройки система сочтёт её браком. Технические записи не проверяются как интервью (длительность, интервалы, «конвейер», зондаж, правила), не идут в квоты и в чистую базу. Место (GPS) у них проверяется."),
+    hint && !same ? h("div", { class: "notice info" }, h("div", { style: "flex:1" }, "Похоже, в колонке ", h("b", {}, `«${hint.col}»`), " есть технические записи: ",
+      h("b", {}, hint.values.map((v) => `«${v}»`).join(", ")), ` — ${fmt(hint.n)} шт.`),
+      h("button", { class: "btn small primary", onclick: () => { t.col = hint.col; t.values = [...hint.values]; saveConfigSoon(); go("form"); } }, "Применить")) : null,
+    h("div", { class: "form-list" }, formRow("Колонка с типом записи", "Например «Тип записи» / «Вид задания». Пусто — технических записей в проекте нет",
+      select(S.state.columns, t.col, (v) => { t.col = v; t.values = []; saveConfigSoon(); drawValues(); }, "— нет технических записей —"))),
+    valuesBox));
+  drawValues();
+
   root.append(h("div", { class: "card" }, h("h2", {}, "Признак завершённого интервью"),
-    h("p", { class: "hint" }, "Колонки из конца анкеты (например ФИО или телефон респондента). Если хотя бы одна заполнена — интервью считается дошедшим до конца. Скринауты короткими быть обязаны, поэтому минимальная длительность и глубина зондажа проверяются только у завершённых. Не выбрано — все анкеты считаются завершёнными."),
+    h("p", { class: "hint" }, "Колонки из конца анкеты (например ФИО или телефон респондента). Если хотя бы одна заполнена — интервью дошло до конца. Скринауты короткими быть обязаны, поэтому минимальная длительность, зондаж и обязательные блоки проверяются только у завершённых. Не выбрано — все анкеты считаются завершёнными."),
     columnPicker(c.completed_cols, (v) => { c.completed_cols = v; saveConfigSoon(); })));
+
+  const auto = S.state.sections_auto || [];
+  const box = h("div", {});
+  const draw = () => {
+    box.replaceChildren(...c.sections.map((sec, i) => h("div", { class: "dim-row sec-row" },
+      h("input", { type: "text", value: sec.name || "", placeholder: "Название блока, напр. «Знание банков»", oninput: (e) => { sec.name = e.target.value; saveConfigSoon(); } }),
+      select(S.state.columns, sec.start, (v) => { sec.start = v; saveConfigSoon(); }, "— первая колонка блока —"),
+      h("label", { class: "check", title: "Если интервью завершено, а в блоке ни одного ответа — брак" }, h("input", { type: "checkbox", checked: !!sec.required, onchange: (e) => { sec.required = e.target.checked; saveConfigSoon(); } }), "обязательный"),
+      h("label", { class: "check", title: "Сетка вопросов с одинаковыми вариантами: все ответы одинаковые — предупреждение" }, h("input", { type: "checkbox", checked: !!sec.grid, onchange: (e) => { sec.grid = e.target.checked; saveConfigSoon(); } }), "сетка"),
+      h("button", { class: "btn small danger", onclick: () => { c.sections.splice(i, 1); saveConfigSoon(); draw(); } }, "Удалить"))));
+    if (!c.sections.length) box.append(h("div", { class: "empty small" }, auto.length
+      ? `Блоки не заданы — берутся группы из заголовков Kobo: ${auto.map((x) => x.name).join(", ")}.`
+      : "Блоки не заданы — ошибки будут показаны по служебным разделам (время, GPS, устройство) и по колонкам."));
+  };
+  draw();
+  root.append(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Блоки анкеты"),
+      h("p", { class: "hint" }, "Чтобы в браке было видно, в каком именно блоке ошибка. Блок начинается с выбранной колонки и идёт до начала следующего блока (в порядке колонок выгрузки). «Обязательный» — у завершённого интервью блок не может быть пустым. «Сетка» — вопросы с одной шкалой: если во всех один и тот же ответ, интервьюер, скорее всего, «прощёлкал» блок.")),
+      h("div", { class: "row" },
+        auto.length ? h("button", { class: "btn", onclick: () => { c.sections = auto.map((x) => ({ name: x.name, start: x.start, required: false, grid: false })); saveConfigSoon(); draw(); } }, "Взять группы Kobo") : null,
+        h("button", { class: "btn", onclick: () => { c.sections.push({ name: "", start: null, required: false, grid: false }); saveConfigSoon(); draw(); } }, "+ Блок"))),
+    box));
 }
 
 // ── Страница «Пороги проверок» ──────────────────────────────────────────────
@@ -364,7 +453,9 @@ function pageChecks(root) {
       formRow("Максимальная длительность анкеты", "Дольше — скорее всего не закрыл форму вовремя", [number(t, "max_duration_min", 5, 600), h("span", { class: "unit" }, "мин")]),
       formRow("Минимальный интервал между анкетами", "И между стартами, и между концом предыдущей и началом следующей", [number(t, "min_interval_min", 0, 60, 0.5), h("span", { class: "unit" }, "мин")]),
       formRow("«Конвейер»: окно времени", "Сколько минут смотреть подряд на одном устройстве", [number(t, "mass_window_min", 1, 120), h("span", { class: "unit" }, "мин")]),
-      formRow("«Конвейер»: анкет в окне", "Столько анкет и больше в окне — массовое штампование", [number(t, "mass_min_count", 2, 100), h("span", { class: "unit" }, "шт")]))),
+      formRow("«Конвейер»: анкет в окне", "Столько анкет и больше в окне — массовое штампование", [number(t, "mass_min_count", 2, 100), h("span", { class: "unit" }, "шт")]),
+      formRow("Массовое открытие анкет", "Столько анкет открыто на одном устройстве почти одновременно — их открыли заранее и заполняют без респондента. Анкета, открытая до окончания предыдущей, отмечается всегда",
+        [number(t, "mass_open_count", 2, 50), h("span", { class: "unit" }, "анкет за"), number(t, "mass_open_sec", 10, 1800, 10), h("span", { class: "unit" }, "сек")]))),
   );
   const nightRows = h("div", {});
   const drawNight = () => nightRows.replaceChildren(...(n.enabled ? [
@@ -512,75 +603,6 @@ function reasonsTable(rows, base) {
   ], rows, { search: false, sortKey: "Анкет", empty: "Ничего не найдено" });
 }
 
-function pageOverview(root) {
-  if (!S.result) return noResult(root);
-  const R = S.result, s = R.summary, sc = s.status_counts, ninter = sc.RED + sc.YELLOW + sc.GREEN || 1;
-  if (s.dropped) root.append(h("div", { class: "notice warn" }, `Пропущено ${fmt(s.dropped)} строк без Device ID/интервьюера или без города.`));
-  if (R.rule_errors.length) root.append(h("div", { class: "notice bad" }, h("div", {}, h("b", {}, "Некоторые правила не проверены: "), R.rule_errors.join("; "))));
-  root.append(h("div", { class: "stats" },
-    h("div", { class: "stat" }, h("div", { class: "k" }, "Всего анкет"), h("div", { class: "v" }, fmt(s.total)), h("div", { class: "s" }, s.period || "")),
-    h("div", { class: "stat red" }, h("div", { class: "k" }, "Брак"), h("div", { class: "v" }, fmt(s.defects)), h("div", { class: "s" }, `${fmt(s.defect_pct, 1)}% от всех`)),
-    h("div", { class: "stat yellow" }, h("div", { class: "k" }, "С предупреждениями"), h("div", { class: "v" }, fmt(s.warnings)), h("div", { class: "s" }, "не считаются браком")),
-    h("div", { class: "stat" }, h("div", { class: "k" }, "Интервьюеров"), h("div", { class: "v" }, fmt(s.interviewers)), h("div", { class: "s" }, `${fmt(s.cities)} городов`))));
-
-  root.append(h("div", { class: "card" },
-    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Статус интервьюеров"), h("p", { class: "hint" }, "По доле брака в их анкетах.")),
-      h("button", { class: "btn small", onclick: () => go("interviewers") }, "Подробнее →")),
-    h("div", { class: "status-bar" }, h("div", { class: "r", style: `width:${sc.RED / ninter * 100}%` }), h("div", { class: "y", style: `width:${sc.YELLOW / ninter * 100}%` }), h("div", { class: "g", style: `width:${sc.GREEN / ninter * 100}%` })),
-    h("div", { class: "legend-row" }, ["RED", "YELLOW", "GREEN"].map((k) => h("span", {}, pill(k), " ", h("b", {}, fmt(sc[k])), h("span", { class: "muted" }, " чел."))))));
-
-  const rv = s.review;
-  if (rv && rv.enabled && (rv.todo || rv["Брак"] || rv["Принять"] || rv["На перезвон"])) {
-    root.append(h("div", { class: `notice ${rv.todo ? "warn" : "ok"}` }, h("div", { style: "flex:1" },
-      rv.todo ? h("b", {}, `Ждут решения руководителя: ${fmt(rv.todo)} анкет. `) : h("b", {}, "Все подозрительные анкеты разобраны. "),
-      `Брак: ${fmt(rv["Брак"])} · На перезвон: ${fmt(rv["На перезвон"])} · Принято: ${fmt(rv["Принять"])}`),
-      h("button", { class: "btn small", onclick: () => go("review") }, "Открыть проверку"),
-      h("button", { class: "btn small", onclick: () => exportReport("clean") }, "Чистая база")));
-  }
-  root.append(h("div", { class: "row", style: "justify-content:flex-end;margin:-6px 0 16px" },
-    h("button", { class: "btn", onclick: () => exportReport("client") }, "Отчёт для заказчика (Excel)")));
-  root.append(h("div", { class: "grid-2" },
-    h("div", { class: "card" }, h("h2", {}, "Причины брака"), h("p", { class: "hint" }, "Одна анкета может иметь несколько причин."), reasonsTable(R.defect_reasons, "% брака")),
-    h("div", { class: "card" }, h("h2", {}, "Предупреждения"), h("p", { class: "hint" }, "Сигналы для ручной проверки — сами по себе не брак."), reasonsTable(R.warning_reasons, "% анкет"))));
-
-  root.append(h("div", { class: "card" }, h("h2", {}, "Проблемы по городам"),
-    R.city_issues.length ? h("ul", { class: "issue-list" }, R.city_issues.map((x) => h("li", {}, pill(x.level), h("span", { class: "city" }, x.city), h("span", {}, x.text))))
-      : h("div", { class: "notice ok" }, "По городам всё в норме.")));
-
-  const waveInput = h("input", { type: "text", placeholder: "Например: Волна 3 — сентябрь", style: "flex:1;max-width:380px" });
-  root.append(h("div", { class: "card" }, h("h2", {}, "Сохранить волну в историю"),
-    h("p", { class: "hint" }, "Итоги по интервьюерам сохранятся на этом компьютере — так видно, кто уже несколько волн подряд в жёлтой или красной зоне. Повторное сохранение с тем же названием перезапишет волну."),
-    h("div", { class: "row" }, waveInput, h("button", { class: "btn primary", onclick: async () => {
-      await guarded(async () => { S.history = await POST("/api/history/save", { wave: waveInput.value }); toast("Волна сохранена"); go("history"); });
-    } }, "Сохранить"))));
-}
-
-function pageInterviewers(root) {
-  if (!S.result) return noResult(root);
-  const R = S.result;
-  root.append(h("div", { class: "card" },
-    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Интервьюеры"), h("p", { class: "hint" }, "Отсортированы по доле брака. Нажмите на строку, чтобы увидеть его анкеты с браком.")),
-      h("button", { class: "btn small", onclick: () => exportReport("interviewers") }, "Excel")),
-    table([
-      { key: "Статус", label: "Статус", render: (r) => pill(r["Статус"]), sortVal: (r) => ({ RED: 3, YELLOW: 2, GREEN: 1 })[r["Статус"]] },
-      { key: "Интервьюер", label: "Интервьюер" }, { key: "Город", label: "Город" },
-      { key: "Анкет", label: "Анкет", num: true }, { key: "Брак", label: "Брак", num: true },
-      { key: "% брака", label: "% брака", num: true, digits: 1 },
-      { key: "Предупреждений", label: "Предупр.", num: true },
-      { key: "Риск (средний)", label: "Риск", num: true, render: (r) => riskTag(r["Риск (средний)"]) },
-      { key: "Повтор значения", label: "Повтор значения", render: (r) => r["Повтор значения"] ? h("span", {}, r["Повтор: статус"] !== "GREEN" ? h("span", { class: `dot ${r["Повтор: статус"]}` }) : null, " ", r["Повтор значения"]) : "" },
-      { key: "Главные причины брака", label: "Главные причины брака", wrap: true },
-    ], R.interviewers, { rowClass: (r) => `row-${r["Статус"]}`, onClick: (r) => showInterviewer(r["Интервьюер"]) })));
-  root.append(h("div", { class: "card" }, h("h2", {}, "Система раннего предупреждения"),
-    h("ul", { class: "issue-list" }, R.legend.map((l) => h("li", {}, h("span", { style: "min-width:110px" }, pill(l.code)), h("b", { style: "min-width:170px" }, l.desc), h("span", { class: "muted" }, l.actions))))));
-}
-
-function showInterviewer(inter) {
-  const rows = S.result.anketas.filter((a) => a.inter === inter && (a.defect || a.warning));
-  openModal(`Интервьюер ${inter}`, table(anketaColumns(), rows, { search: false, height: 460, rowClass: (r) => r.defect ? "row-RED" : "row-YELLOW",
-    onClick: (r) => openAnketa(r.pos) }));
-}
-
 function anketaColumns() {
   return [
     { key: "id", label: "ID анкеты" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
@@ -591,32 +613,6 @@ function anketaColumns() {
     { key: "warnings", label: "Предупреждения", wrap: true },
     { key: "decision", label: "Решение", render: (r) => decisionTag(r.decision) },
   ];
-}
-
-function pageAnketas(root) {
-  if (!S.result) return noResult(root);
-  const all = S.result.anketas;
-  const filters = { defect: ["Брак", (a) => a.defect], warning: ["Предупреждения", (a) => a.warning && !a.defect], all: ["Все", () => true] };
-  const seg = h("div", { class: "segmented" }, Object.entries(filters).map(([k, [label, fn]]) =>
-    h("button", { class: S.anketaFilter === k ? "on" : "", onclick: () => { S.anketaFilter = k; go("anketas"); } }, `${label} · ${fmt(all.filter(fn).length)}`)));
-  const rows = all.filter(filters[S.anketaFilter][1]);
-  root.append(h("div", { class: "card" },
-    table([...anketaColumns().slice(0, 3), { key: "device", label: "Device ID" }, ...anketaColumns().slice(3)], rows,
-      { tools: seg, rowClass: (r) => r.defect ? "row-RED" : r.warning ? "row-YELLOW" : "", height: 640, onClick: (r) => openAnketa(r.pos) })));
-}
-
-function pageCities(root) {
-  if (!S.result) return noResult(root);
-  const R = S.result;
-  if (R.city_issues.length) root.append(h("div", { class: "card" }, h("h2", {}, "Проблемы по городам"),
-    h("ul", { class: "issue-list" }, R.city_issues.map((x) => h("li", {}, pill(x.level), h("span", { class: "city" }, x.city), h("span", {}, x.text))))));
-  root.append(h("div", { class: "card" }, h("h2", {}, "Города"),
-    table([
-      { key: "Статус", label: "Статус", render: (r) => pill(r["Статус"]) },
-      { key: "Город", label: "Город" }, { key: "Анкет", label: "Анкет", num: true },
-      { key: "Интервьюеров", label: "Интервьюеров", num: true }, { key: "Брак", label: "Брак", num: true },
-      { key: "% брака", label: "% брака", num: true, digits: 1 },
-    ], R.cities, { sortKey: "% брака", rowClass: (r) => `row-${r["Статус"]}` })));
 }
 
 function pageAnswers(root) {
@@ -800,7 +796,7 @@ async function autoRefresh() {
     if (r.refresh.new) {
       toast(`Новых анкет: ${fmt(r.refresh.new)}` + (r.refresh.new_defects ? ` · из них с браком: ${fmt(r.refresh.new_defects)}` : ""), r.refresh.new_defects > 0);
     }
-    if ($("#modal").hidden && !["columns", "checks", "open", "rules", "admin", "gps", "map", "quotaSetup", "review"].includes(S.page)) go(S.page);
+    if ($("#modal").hidden && !PAGES[S.page].setup && !["admin", "map", "review", "data"].includes(S.page)) go(S.page);
   } catch (e) { /* ошибку покажет следующая ручная проверка; вход — через showLogin */ }
 }
 
@@ -947,7 +943,9 @@ function pageGps(root) {
         [number(g, "same_point_min", 2, 100), h("span", { class: "unit" }, "анкет"), sev("same_severity")]),
       formRow("«Телепорт»", "Между соседними анкетами интервьюер переместился быстрее этой скорости (и дальше минимального расстояния)",
         [number(g, "max_speed_kmh", 5, 500), h("span", { class: "unit" }, "км/ч"), number(g, "min_jump_km", 0.1, 50, 0.1), h("span", { class: "unit" }, "км"), sev("jump_severity")]),
-      formRow("Нет координат", "GPS не записался в анкете", sev("no_gps_severity")))));
+      formRow("Нет координат", "GPS не записался в анкете", sev("no_gps_severity")),
+      formRow("Не в своём городе", "Координаты за чертой города, указанного в анкете. Граница — из справочника 38 городов Узбекистана или по плановым точкам города, плюс запас",
+        [toggle(g, "city_check"), number(g, "city_margin_km", 0, 50, 0.5), h("span", { class: "unit" }, "км запаса"), sev("city_severity")]))));
 
   const fileInput = h("input", { type: "file", accept: ".xlsx", hidden: true, onchange: async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -1039,109 +1037,10 @@ function planEditor(g) {
   return wrap;
 }
 
-// ── GPS: карта ──────────────────────────────────────────────────────────────
-let leafletMap = null;
-function pageMap(root) {
-  if (!S.result) return noResult(root);
-  const g = S.result.geo || {};
-  if (!g.enabled) {
-    root.append(h("div", { class: "card" }, h("div", { class: "empty" }, h("b", {}, "GPS-контроль не включён"),
-      "Выберите колонки с координатами на странице «Колонки» и запустите проверку.",
-      h("div", { style: "margin-top:14px" }, h("button", { class: "btn", onclick: () => go("gps") }, "Настроить GPS")))));
-    return;
-  }
-  root.append(h("div", { class: "stats" },
-    h("div", { class: "stat" }, h("div", { class: "k" }, "Анкет с GPS"), h("div", { class: "v" }, fmt(g.with_gps)), h("div", { class: "s" }, g.without_gps ? `без GPS: ${fmt(g.without_gps)}` : "у всех есть координаты")),
-    h("div", { class: "stat red" }, h("div", { class: "k" }, "Далеко от точки"), h("div", { class: "v" }, fmt(g.far)), h("div", { class: "s" }, `дальше ${g.max_dist_km} км`)),
-    h("div", { class: "stat yellow" }, h("div", { class: "k" }, "Скоплений сверх лимита"), h("div", { class: "v" }, fmt(g.clusters_over)), h("div", { class: "s" }, `больше ${g.max_per_point} анкет в одном месте`)),
-    h("div", { class: "stat red" }, h("div", { class: "k" }, "Одинаковые координаты"), h("div", { class: "v" }, fmt(g.same)), h("div", { class: "s" }, "анкет — копирование/подмена GPS")),
-    h("div", { class: "stat red" }, h("div", { class: "k" }, "«Телепорт»"), h("div", { class: "v" }, fmt(g.jumps || 0)), h("div", { class: "s" }, `быстрее ${g.max_speed_kmh} км/ч между анкетами`))));
-  if (g.unmatched_cities.length) root.append(h("div", { class: "notice warn" }, `Нет в плане точек: ${g.unmatched_cities.join(", ")} — расстояние для этих городов не проверяется.`));
-
-  const cities = [...new Set(g.points.map((p) => p.city))].sort((a, b) => String(a).localeCompare(String(b), "ru"));
-  const inters = (city) => [...new Set(g.points.filter((p) => p.city === city).map((p) => p.inter))].sort();
-  S.mapCity = cities.includes(S.mapCity) ? S.mapCity : cities[0];
-  S.mapInter = S.mapInter || "";
-  const box = h("div", { class: "map" });
-  const controls = h("div", { class: "row", style: "margin-bottom:12px" },
-    select(cities, S.mapCity, (v) => { S.mapCity = v; S.mapInter = ""; go("map"); }),
-    select(inters(S.mapCity), S.mapInter, (v) => { S.mapInter = v || ""; draw(); }, "Все интервьюеры"),
-    h("span", { class: "spacer" }),
-    h("span", { class: "muted small" }, "Выберите интервьюера — покажу его маршрут по времени"));
-  root.append(h("div", { class: "card" }, controls, box,
-    h("div", { class: "map-legend" },
-      h("span", {}, h("i", { style: "background:#0A84FF" }), "плановая точка и допустимый радиус"),
-      h("span", {}, h("i", { style: "background:#34C759" }), "анкета в норме"),
-      h("span", {}, h("i", { style: "background:#FF9F0A" }), "в скоплении"),
-      h("span", {}, h("i", { style: "background:#E0352B" }), "далеко от точки / одинаковые координаты / «телепорт»"))));
-
-  if (leafletMap) { leafletMap.remove(); leafletMap = null; }
-  if (!window.L) { box.replaceChildren(h("div", { class: "empty" }, "Карта не загрузилась.")); return; }
-  leafletMap = L.map(box, { zoomControl: true });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(leafletMap);
-  const layer = L.layerGroup().addTo(leafletMap);
-
-  function draw() {
-    layer.clearLayers();
-    const bounds = [];
-    const planPts = ((g.plan[S.mapCity] || Object.entries(g.plan).find(([k]) => k.toLowerCase() === String(S.mapCity).toLowerCase())?.[1] || {}).points) || [];
-    planPts.forEach((p, i) => {
-      L.circle([p.lat, p.lon], { radius: (Number(p.radius_km) || g.max_dist_km) * 1000, color: "#0A84FF", weight: 1, fillOpacity: 0.04 }).addTo(layer);
-      L.circleMarker([p.lat, p.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#0A84FF", fillOpacity: 1 })
-        .bindTooltip(h("span", {}, p.street_ru || `Точка ${i + 1}`)).addTo(layer);
-      bounds.push([p.lat, p.lon]);
-    });
-    const shown = g.points.filter((p) => p.city === S.mapCity && (!S.mapInter || p.inter === S.mapInter));
-    if (S.mapInter) {
-      // маршрут интервьюера: анкеты по времени, отдельной линией на каждый день
-      const byDay = {};
-      shown.filter((p) => p.start).sort((a, b) => a.start.localeCompare(b.start)).forEach((p) => { (byDay[p.start.slice(0, 5)] ||= []).push([p.lat, p.lon]); });
-      Object.values(byDay).forEach((line) => L.polyline(line, { color: "#5856D6", weight: 2, opacity: 0.7, dashArray: "4 6" }).addTo(layer));
-    }
-    shown.forEach((p) => {
-      const bad = p.far || p.same || p.jump;
-      const color = bad ? "#E0352B" : p.cluster ? "#FF9F0A" : "#34C759";
-      const why = [p.far && `далеко: ${p.dist} км от «${p.point}»`, p.cluster && "в скоплении", p.same && "одинаковые координаты", p.jump && "«телепорт»"].filter(Boolean).join(", ");
-      const esc = (t) => String(t ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-      L.circleMarker([p.lat, p.lon], { radius: 5, color: "#fff", weight: 1, fillColor: color, fillOpacity: 0.9 })
-        .bindPopup(`<b>${esc(p.inter)}</b> · анкета ${esc(p.id)}${p.start ? ` · ${esc(p.start)}` : ""}<br>${p.dist != null ? `до точки ${p.dist} км` : "город не в плане"}${why ? `<br><span style="color:${color}">${esc(why)}</span>` : ""}`)
-        .addTo(layer);
-      bounds.push([p.lat, p.lon]);
-    });
-    if (bounds.length) leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
-    else leafletMap.setView([41.3, 69.24], 11);
-  }
-  draw();
-  setTimeout(() => { if (leafletMap) { leafletMap.invalidateSize(); draw(); } }, 60);
-
-  root.append(h("div", { class: "card" }, h("h2", {}, "Скопления анкет"),
-    h("p", { class: "hint" }, `Где каждый интервьюер реально стоял: анкеты ближе ${g.min_sep_km} км объединены в одну точку. Больше ${g.max_per_point} анкет в одном месте — подозрительно.`),
-    table([{ key: "Статус", label: "Статус", render: (r) => pill(r["Статус"]) },
-      { key: "Город", label: "Город" }, { key: "Интервьюер", label: "Интервьюер" }, { key: "Точка", label: "Точка" },
-      { key: "Анкет", label: "Анкет", num: true }, { key: "Лимит", label: "Лимит", num: true }],
-      g.clusters, { sortKey: "Анкет", rowClass: (r) => `row-${r["Статус"]}`, height: 420 })));
-  if ((g.point_stats || []).length) {
-    root.append(h("div", { class: "card" }, h("h2", {}, "Плановые точки"),
-      h("p", { class: "hint" }, "Сколько анкет собрано в радиусе каждой точки и не превышена ли её квота (квоту и радиус задают в «GPS-контроль»)."),
-      table([{ key: "Статус", label: "", render: (r) => h("span", { class: `dot ${r["Статус"]}`, title: { RED: "квота превышена", GREEN: "есть анкеты", YELLOW: "анкет нет" }[r["Статус"]] }) },
-        { key: "Город", label: "Город" }, { key: "Точка", label: "Точка" }, { key: "Радиус, км", label: "Радиус, км", num: true, digits: 2 },
-        { key: "Анкет", label: "Анкет", num: true }, { key: "Квота", label: "Квота", num: true, render: (r) => r["Квота"] ?? "—" },
-        { key: "Интервьюеров", label: "Интервьюеров", num: true }],
-        g.point_stats, { sortKey: "Анкет", height: 420, rowClass: (r) => r["Статус"] === "RED" ? "row-RED" : "" })));
-  }
-  const flagged = g.points.filter((p) => p.far || p.same || p.jump);
-  root.append(h("div", { class: "card" }, h("h2", {}, "Анкеты не на месте"),
-    table([{ key: "id", label: "ID анкеты" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
-      { key: "dist", label: "До точки, км", num: true, digits: 2 }, { key: "point", label: "Ближайшая точка" },
-      { key: "why", label: "Причина", render: (p) => [p.far && "далеко от точки", p.same && "одинаковые координаты", p.jump && "«телепорт»"].filter(Boolean).join(", ") }],
-      flagged, { sortKey: "dist", rowClass: () => "row-RED", height: 420, empty: "Все анкеты у плановых точек" })));
-}
-
-
 // ── Проверка анкет руководителем ─────────────────────────────────────────────
 function reviewFilters() {
   return {
-    todo: ["Нужно решить", (a) => (a.defect || a.warning) && !a.decision],
+    todo: ["Нужно решить", (a) => (a.defect || a.warning) && !a.decision && !a.technical],
     call: ["На перезвон", (a) => a.decision === "На перезвон"],
     brak: ["Брак", (a) => a.decision === "Брак"],
     ok: ["Принято", (a) => a.decision === "Принять"],
@@ -1244,9 +1143,12 @@ async function openAnketa(pos) {
     a.decision ? h("button", { class: "btn ghost", onclick: async () => { await decide([pos], "", ""); closeModal(); go(S.page); } }, "Снять") : null) : null;
 
   const body = h("div", {},
+    d.technical ? h("div", { class: "notice info" }, "Техническая запись (видео/фото по заданию) — как интервью не проверяется.") : null,
     h("div", { class: "facts" },
       h("div", {}, h("b", {}, "Решение"), decisionTag(a.decision)),
       h("div", {}, h("b", {}, "Балл риска"), riskTag(a.risk)),
+      h("div", {}, h("b", {}, "Главная причина"), d.primary || "—"),
+      h("div", {}, h("b", {}, "Регион"), d.region || "—"),
       h("div", {}, h("b", {}, "Город"), d.city || "—"),
       h("div", {}, h("b", {}, "Интервьюер"), d.inter || "—"),
       h("div", {}, h("b", {}, "Устройство"), d.device || "—"),
@@ -1256,12 +1158,13 @@ async function openAnketa(pos) {
     decideBox,
     h("h3", {}, d.issues.length ? "Почему система отметила анкету" : "Замечаний нет"),
     h("ul", { class: "why" }, d.issues.map((i) => h("li", { class: i.severity },
-      h("span", { class: `pill ${i.severity === "defect" ? "RED" : "YELLOW"}` }, i.severity === "defect" ? "Брак" : "Предупреждение"),
-      h("div", { class: "t" }, i.label),
+      h("span", { class: `pill ${i.severity === "defect" ? "RED" : "YELLOW"}` }, i.severity === "defect" ? "Брак" : "Проверить"),
+      h("div", { class: "t" }, i.label, h("span", { class: "blk" }, `Блок: ${i.block}`)),
       h("div", {}, i.text),
       h("div", { class: "l" }, "Логика: ", i.logic),
       i.columns.length ? h("div", { class: "cols" }, i.columns.map((c) => h("span", { class: "chip" }, h("span", {}, c)))) : null))),
     d.previous ? h("div", { class: "notice info" }, `Предыдущая анкета на этом устройстве: ${d.previous.id}, ${d.previous.start} → ${d.previous.end}`) : null,
+    d.lat != null && window.L ? h("div", {}, h("h3", {}, "Где сделана анкета"), anketaMap(a, d)) : null,
     h("div", { class: "row", style: "justify-content:space-between;margin:6px 0 10px" },
       h("h3", { style: "margin:0" }, "Исходная строка из таблицы"),
       h("label", { class: "row small muted" }, h("input", { type: "checkbox", onchange: (e) => { onlyHl = e.target.checked; drawValues(); } }), "Только колонки, по которым сработали проверки")),
@@ -1270,6 +1173,26 @@ async function openAnketa(pos) {
   openModal(`Анкета ${d.id}`, body, true);
 }
 
+
+function anketaMap(a, d) {
+  const box = h("div", { class: "map small" });
+  requestAnimationFrame(() => {
+    if (!document.body.contains(box)) return;
+    const m = freshMap(box);
+    const g = S.result.geo || {};
+    const city = String(d.city || "").toLowerCase();
+    const plan = Object.entries(g.plan || {}).find(([k]) => k.toLowerCase() === city);
+    const pts = plan ? plan[1].points || [] : [];
+    pts.forEach((p) => {
+      L.circle([p.lat, p.lon], { radius: (Number(p.radius_km) || g.max_dist_km || 2) * 1000, color: "#2a78d6", weight: 1, fillOpacity: 0.05, interactive: false }).addTo(m);
+      L.circleMarker([p.lat, p.lon], { radius: 5, color: "#fff", weight: 2, fillColor: "#2a78d6", fillOpacity: 1 }).bindTooltip(esc(p.street_ru || "точка")).addTo(m);
+    });
+    L.circleMarker([d.lat, d.lon], { radius: 8, color: "#fff", weight: 2.5, fillColor: MAP_COLORS[stateOf(a)], fillOpacity: 1 }).bindTooltip(`Анкета ${esc(d.id)}`).addTo(m);
+    const near = pts.map((p) => [p.lat, p.lon]).sort((x, y) => Math.hypot(x[0] - d.lat, x[1] - d.lon) - Math.hypot(y[0] - d.lat, y[1] - d.lon))[0];
+    m.fitBounds(near ? [[d.lat, d.lon], near] : [[d.lat, d.lon]], { padding: [40, 40], maxZoom: 15 });
+  });
+  return box;
+}
 
 // ── Квоты: настройка ────────────────────────────────────────────────────────
 function quotaLabels(q) {
@@ -1338,9 +1261,17 @@ function pageQuotas(root) {
   }
   const sm = q.summary;
   root.append(h("div", { class: "stats" },
-    h("div", { class: "stat" }, h("div", { class: "k" }, "Выполнение плана"), h("div", { class: "v" }, `${sm.pct}%`), h("div", { class: "s" }, `${fmt(sm.ok)} засчитано из ${fmt(sm.plan)}`)),
+    h("div", { class: "stat" }, h("div", { class: "k" }, "Выполнение плана"), h("div", { class: "v" }, `${sm.pct}%`), h("div", { class: "s" }, `в пределах плана засчитано ${fmt(sm.ok_in_plan)} из ${fmt(sm.plan)}`)),
     h("div", { class: "stat yellow" }, h("div", { class: "k" }, "Осталось добрать"), h("div", { class: "v" }, fmt(sm.left)), h("div", { class: "s" }, `ячеек выполнено: ${sm.cells_done} из ${sm.cells}`)),
     h("div", { class: "stat red" }, h("div", { class: "k" }, "Перебор"), h("div", { class: "v" }, fmt(sm.over)), h("div", { class: "s" }, "лишние анкеты сверх плана"))));
+  if (q.labels.includes("Город")) {
+    const byCity = new Map();
+    q.rows.forEach((r) => { const x = byCity.get(r["Город"]) || { plan: 0, ok: 0 }; x.plan += r["План"]; x.ok += Math.min(r["Засчитано"], r["План"]); byCity.set(r["Город"], x); });
+    const items = [...byCity].map(([city, x]) => ({ label: city, value: x.plan ? x.ok / x.plan * 100 : 0, sub: `${fmt(x.ok)} из ${fmt(x.plan)}` }))
+      .sort((a, b) => a.value - b.value);
+    root.append(card("Выполнение по городам", "Засчитанные анкеты в пределах плана. Сверху — где отстают сильнее всего.",
+      hbars(items, { color: "c-ok", max: 100, limit: 20, fmtVal: (it) => `${fmt(it.value, 0)}%` })));
+  }
   const bar = (r) => {
     const t = Math.max(r["План"], 1);
     return h("div", { class: "quota-bar" }, h("div", { class: "bar" },
@@ -1389,11 +1320,13 @@ async function enterApp() {
   scheduleAuto();
   go(S.result ? "overview" : "data");
 }
+window.addEventListener("resize", () => { if (S.result && ["overview", "defects", "interviewers"].includes(S.page) && $("#modal").hidden) { clearTimeout(S._rs); S._rs = setTimeout(() => go(S.page), 250); } });
 
 async function init() {
-  document.querySelectorAll("#nav a").forEach((a) => a.addEventListener("click", () => go(a.dataset.page)));
+  document.querySelectorAll("#nav a").forEach((a) => a.addEventListener("click", () => (a.dataset.page === "setup" ? openSetup() : go(a.dataset.page))));
   $("#runBtn").addEventListener("click", runChecks);
   $("#exportBtn").addEventListener("click", () => exportReport("full"));
+  $("#wordBtn").addEventListener("click", () => exportReport("word"));
   $("#modalClose").addEventListener("click", closeModal);
   $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });

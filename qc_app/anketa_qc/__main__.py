@@ -51,15 +51,15 @@ class JsApi:
         self._app = app
         self._window = None
 
-    def save_export(self, kind):
+    def save_export(self, kind, filters=None):
         import webview
         sess = self._app.config["SESSION"]
         try:
-            name, data = sess.export_bytes(kind)
+            name, data = sess.export_bytes(kind, filters)
         except ValueError as e:
             return {"error": str(e)}
-        path = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=name,
-                                               file_types=("Excel (*.xlsx)",))
+        types = ("Word (*.docx)",) if name.endswith(".docx") else ("Excel (*.xlsx)",)
+        path = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=name, file_types=types)
         if not path:
             return {"cancelled": True}
         path = path[0] if isinstance(path, (list, tuple)) else path
@@ -75,6 +75,7 @@ def selftest():
     app = create_app(Path(tempfile.mkdtemp()))
     client = app.test_client()
     ok = client.get("/").status_code == 200 and client.get("/web/app.js").status_code == 200
+    ok = ok and client.get("/web/dash.js").status_code == 200
     ok = ok and client.get("/api/auth").status_code == 200
     ok = ok and client.get("/web/vendor/leaflet/leaflet.js").status_code == 200
     from . import geo
@@ -83,6 +84,16 @@ def selftest():
     # .NET через pythonnet) — именно она падала у файлов из скачанного zip.
     unblock_bundle()
     try:
+        # библиотеки отчёта Word (шаблон документа, графики) и справочник городов
+        import io
+        from docx import Document
+        from . import word  # noqa: F401  (matplotlib c бэкендом Agg)
+        import matplotlib.pyplot as plt
+        Document().save(io.BytesIO())
+        fig = plt.figure(figsize=(1, 1))
+        plt.plot([0, 1], [0, 1])
+        fig.savefig(io.BytesIO(), format="png")
+        ok = ok and geo.find_city("Samarqand") is not None
         import webview  # noqa: F401
         if sys.platform == "win32":
             import webview.platforms.winforms  # noqa: F401

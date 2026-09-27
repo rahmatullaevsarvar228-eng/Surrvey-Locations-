@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -305,11 +306,14 @@ def test_gps_through_api(tmp_path, demo_bytes):
     cfg = state["config"]
     cfg["mapping"] = state["suggested"]
     cfg["geo"]["plan"] = client.get("/api/geo/default-plan").get_json()
-    r = client.post("/api/run", json={"config": cfg}).get_json()
+    resp = client.post("/api/run", json={"config": cfg})
+    # браузер не прочитает NaN — ответ должен быть строгим JSON
+    json.loads(resp.data, parse_constant=lambda c: pytest.fail(f"{c} в ответе API"))
+    r = resp.get_json()
     g = r["geo"]
     assert g["enabled"] and g["far"] > 0 and g["clusters_over"] > 0 and g["same"] > 0
-    flagged = {p["inter"] for p in g["points"] if p["far"]}
-    assert "Inter 08" in flagged                     # «сидит дома»
+    assert {p["inter"] for p in g["points"] if p["out_city"]} == {"Inter 08"}   # «сидит дома» за городом
+    assert {p["inter"] for p in g["points"] if p["far"]} == {"Inter 04"}      # отошёл от точки на 3 км
     assert any(c["Интервьюер"] == "Inter 03" and c["Статус"] == "RED" for c in g["clusters"])
     wb = openpyxl.load_workbook(io.BytesIO(client.get("/api/export/full").data))
     assert {"GPS", "GPS скопления"} <= set(wb.sheetnames)
@@ -408,3 +412,43 @@ def test_rejects_foreign_host(tmp_path):
     client = create_app(tmp_path, client_factory=FakeClient).test_client()
     assert client.get("/api/auth", headers={"Host": "evil.example:8765"}).status_code == 403
     assert client.get("/api/auth", headers={"Host": "127.0.0.1:51234"}).status_code == 200
+
+
+def test_word_report_dashboard_payload_and_technical(tmp_path, demo_bytes):
+    data = pd.read_excel(io.BytesIO(demo_bytes), sheet_name="data")
+    FakeClient.frames = {"Т1": data}
+    FakeClient.saved = {}
+    client = create_app(tmp_path, client_factory=FakeClient).test_client()
+    login(client, "boss")
+    state = client.post("/api/source/remote", json={"ids": ["Т1"]}).get_json()
+    # подсказка про технические записи и значения колонки для настройки
+    assert state["technical_hint"][0]["col"] == "Тип записи"
+    vals = client.get("/api/column/values?col=Тип записи").get_json()
+    assert {v["value"] for v in vals} == {"Интервью", "Техническое задание (видео)"}
+    cfg = state["config"]
+    cfg["mapping"] = state["suggested"]
+    cfg["technical"] = {"col": "Тип записи", "values": ["Техническое задание (видео)"]}
+    cfg["geo"]["plan"] = client.get("/api/geo/default-plan").get_json()
+    cfg["sections"] = [{"name": "Знание банков", "start": "1. Название какого банка первым приходит Вам на ум?"}]
+    r = client.post("/api/run", json={"config": cfg}).get_json()
+    s = r["summary"]
+    assert s["technical"] == (data["Тип записи"] != "Интервью").sum() and s["interviews"] + s["technical"] == s["total"]
+    tech = [a for a in r["anketas"] if a["technical"]]
+    assert tech and not any(a["defect"] and any(i[0] == "too_short" for i in a["issues"]) for a in tech)
+    # у каждой проблемы есть блок и короткое название — для дашбордов
+    iss = [i for a in r["anketas"] for i in a["issues"]]
+    assert iss and all(len(i) == 5 and i[2] and i[3] for i in iss)
+    assert {a["region"] for a in r["anketas"]} >= {"г. Ташкент", "Самаркандская обл."}
+
+    # отчёт Word: целиком и по одному городу
+    from docx import Document
+    resp = client.get("/api/export/word")
+    assert resp.status_code == 200 and resp.headers["Content-Disposition"].split("filename=")[1].strip('"').endswith(".docx")
+    doc = Document(io.BytesIO(resp.data))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    for part in ("1. Итог", "Где брак", "Почему брак", "GPS", "Интервьюеры", "Выводы", "Комментарий руководителя"):
+        assert part in text
+    assert doc.inline_shapes and len(doc.inline_shapes) >= 3          # графики и карты
+    one = Document(io.BytesIO(client.get("/api/export/word?city=Самарканд").data))
+    table = next(t for t in one.tables if t.rows[0].cells[0].text == "Город" and t.rows[0].cells[1].text == "Регион")
+    assert [row.cells[0].text for row in table.rows[1:]] == ["Самарканд"]

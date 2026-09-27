@@ -32,7 +32,8 @@ EXPLAIN = {
                           "по местному времени выгрузки."),
     "dup_phone": (("phone",), "Такой же телефон (последние 9 цифр) есть в другой анкете — один человек опрошен дважды "
                               "или номер вписан из другой анкеты."),
-    "dup_name": (("name", "city"), "Те же имя и фамилия в том же городе в другой анкете."),
+    "dup_name": (("name", "city", "inter"), "Те же имя и фамилия в другой анкете того же интервьюера в том же "
+                                            "городе. Тёзки у разных интервьюеров дубликатом не считаются."),
     "probe_depth": ((), "В открытом вопросе респондент назвал меньше вариантов, чем требуется. Интервьюер обязан "
                         "переспрашивать «А ещё?»."),
     "probe_low_avg": (("inter",), "У интервьюера в среднем заметно меньше ответов в открытых вопросах, чем в среднем "
@@ -46,6 +47,19 @@ EXPLAIN = {
                                                          "координаты или время подделаны."),
     "geo_same": (("lat", "lon", "inter"), "Координаты совпадают до метра с другими анкетами этого интервьюера — "
                                           "реальные интервью в разных местах так не совпадают."),
+    "geo_city": (("lat", "lon", "city"), "Расстояние от координат анкеты до центра города, который указан в анкете, "
+                                         "больше границы города (радиус города + {city_margin_km} км запаса). "
+                                         "Интервью проведено в другом месте или город выбран неверно."),
+    "overlap": (("device", "start", "end"), "На этом устройстве новая анкета открыта раньше, чем закончена "
+                                            "предыдущая. Один интервьюер не может вести два интервью сразу — "
+                                            "анкеты заполнялись параллельно, без респондента."),
+    "mass_open": (("device", "start"), "На одном устройстве {mass_open_count}+ анкет открыты в пределах "
+                                       "{mass_open_sec} сек. Так бывает, когда анкеты открывают заранее "
+                                       "«пачкой» и потом заполняют сами."),
+    "block_empty": ((), "Интервью отмечено как завершённое, но в обязательном блоке нет ни одного ответа — "
+                        "блок пропущен."),
+    "grid_same": ((), "Во всех вопросах блока-сетки выбран один и тот же вариант. Похоже, интервьюер "
+                      "«прощёлкал» блок, не зачитывая вопросы."),
 }
 
 
@@ -56,7 +70,7 @@ def _params(cfg):
     return p
 
 
-def explain(cfg, code, text):
+def explain(cfg, code, text, columns=None):
     """Человеческое объяснение и список колонок исходной таблицы, на которые
     смотрела проверка."""
     m = cfg["mapping"]
@@ -73,6 +87,10 @@ def explain(cfg, code, text):
     except (KeyError, IndexError):
         pass
     cols = [m[r] for r in roles if m.get(r)]
+    if code in ("block_empty", "grid_same"):
+        from .blocks import build_sections
+        name = text.split("«")[1].split("»")[0] if "«" in text else ""
+        cols = next((sec["columns"] for sec in build_sections(columns or [], cfg) if sec["name"] == name), [])
     if code == "probe_depth":
         label = text.split(":")[0]
         for b in cfg["probing"].get("blocks") or []:
@@ -88,9 +106,10 @@ def anketa_detail(result, cfg, pos, decision=None):
     df, raw = result["df"], result["raw"]
     row = df[df["pos"] == pos].iloc[0]
     issues, highlight = [], []
-    for code, sev, text in row["issues"]:
-        logic, cols = explain(cfg, code, text)
-        issues.append({"code": code, "severity": sev, "label": engine.ISSUE_LABELS.get(code, code),
+    for (code, sev, text), block in zip(row["issues"], row["blocks"]):
+        logic, cols = explain(cfg, code, text, list(raw.columns))
+        issues.append({"code": code, "severity": sev, "label": engine.short_label(code),
+                       "full_label": engine.ISSUE_LABELS.get(code, code), "block": block,
                        "text": text, "logic": logic, "columns": cols})
         highlight += [c for c in cols if c not in highlight]
 
@@ -100,13 +119,17 @@ def anketa_detail(result, cfg, pos, decision=None):
                        else v.strftime("%Y-%m-%d %H:%M:%S"), "highlight": col in highlight})
 
     prev = None
-    if any(i["code"] in ("start_gap", "no_rest", "conveyor") for i in issues) and pd.notna(row["deviceid"]):
-        same = df[(df["deviceid"] == row["deviceid"]) & (df["start"] < row["start"])].sort_values("start")
+    if any(i["code"] in ("start_gap", "no_rest", "conveyor", "overlap", "mass_open") for i in issues) and pd.notna(row["deviceid"]):
+        same = df[(df["deviceid"] == row["deviceid"]) & (df["start"] < row["start"]) & ~df["technical"]].sort_values("start")
         if len(same):
             p = same.iloc[-1]
             prev = {"id": p["row_id"], "start": _fmt(p["start"]), "end": _fmt(p["end"])}
     return {
-        "id": row["row_id"], "city": row["city"], "inter": row["inter"], "device": row["deviceid"],
+        "id": row["row_id"], "city": row["city"], "region": row["region"], "inter": row["inter"],
+        "device": row["deviceid"], "technical": bool(row["technical"]), "completed": bool(row["completed"]),
+        "risk": int(row["risk"]), "primary": engine.short_label(row["primary"]) if isinstance(row["primary"], str) else None,
+        "lat": None if pd.isna(row["lat"]) else float(row["lat"]),
+        "lon": None if pd.isna(row["lon"]) else float(row["lon"]),
         "start": _fmt(row["start"]), "end": _fmt(row["end"]),
         "duration": None if pd.isna(row["duration_min"]) else round(float(row["duration_min"]), 1),
         "defect": bool(row["is_defect"]), "warning": bool(row["is_warning"]),
@@ -125,6 +148,8 @@ def clean_base(result, decisions_by_pos):
     df, raw = result["df"], result["raw"]
     keep, pending = [], []
     for x in df.itertuples():
+        if x.technical:          # технические записи — не интервью, в базу не идут
+            continue
         d = (decisions_by_pos.get(x.pos) or {}).get("decision")
         if d == "Принять" or (not d and not x.is_defect):
             keep.append(x.pos)
@@ -139,3 +164,10 @@ def clean_base(result, decisions_by_pos):
     todo = raw.loc[sorted(pending)].copy()
     todo.insert(0, "Причина (система)", [by_pos.at[p, "reason_text"] for p in sorted(pending)])
     return clean, todo
+
+
+def technical_rows(result):
+    """Технические записи (видео/фото по заданию) — отдельным листом."""
+    df, raw = result["df"], result["raw"]
+    pos = sorted(df.loc[df["technical"], "pos"])
+    return raw.loc[pos].copy()

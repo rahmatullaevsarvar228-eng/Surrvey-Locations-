@@ -1,0 +1,449 @@
+[
+ {
+  "name": "Ташкент",
+  "region": "г. Ташкент",
+  "lat": 41.3111,
+  "lon": 69.2797,
+  "radius_km": 18,
+  "aliases": [
+   "Toshkent",
+   "Tashkent",
+   "Тошкент"
+  ]
+ },
+ {
+  "name": "Чирчик",
+  "region": "Ташкентская обл.",
+  "lat": 41.4689,
+  "lon": 69.5822,
+  "radius_km": 7,
+  "aliases": [
+   "Chirchiq",
+   "Chirchik",
+   "Чирчиқ"
+  ]
+ },
+ {
+  "name": "Ангрен",
+  "region": "Ташкентская обл.",
+  "lat": 41.0167,
+  "lon": 70.1436,
+  "radius_km": 7,
+  "aliases": [
+   "Angren"
+  ]
+ },
+ {
+  "name": "Алмалык",
+  "region": "Ташкентская обл.",
+  "lat": 40.8447,
+  "lon": 69.5983,
+  "radius_km": 6,
+  "aliases": [
+   "Olmaliq",
+   "Almalyk",
+   "Олмалиқ"
+  ]
+ },
+ {
+  "name": "Бекабад",
+  "region": "Ташкентская обл.",
+  "lat": 40.2217,
+  "lon": 69.2697,
+  "radius_km": 6,
+  "aliases": [
+   "Bekobod",
+   "Bekabad",
+   "Бекобод"
+  ]
+ },
+ {
+  "name": "Нурафшон",
+  "region": "Ташкентская обл.",
+  "lat": 41.0439,
+  "lon": 69.3564,
+  "radius_km": 5,
+  "aliases": [
+   "Nurafshon",
+   "Тойтепа",
+   "Toytepa"
+  ]
+ },
+ {
+  "name": "Янгиюль",
+  "region": "Ташкентская обл.",
+  "lat": 41.1122,
+  "lon": 69.0472,
+  "radius_km": 5,
+  "aliases": [
+   "Yangiyo'l",
+   "Yangiyul",
+   "Янгийўл"
+  ]
+ },
+ {
+  "name": "Газалкент",
+  "region": "Ташкентская обл.",
+  "lat": 41.56,
+  "lon": 69.77,
+  "radius_km": 4,
+  "aliases": [
+   "G'azalkent",
+   "Gazalkent",
+   "Ғазалкент"
+  ]
+ },
+ {
+  "name": "Самарканд",
+  "region": "Самаркандская обл.",
+  "lat": 39.6542,
+  "lon": 66.9597,
+  "radius_km": 10,
+  "aliases": [
+   "Samarqand",
+   "Samarkand",
+   "Самарқанд"
+  ]
+ },
+ {
+  "name": "Каттакурган",
+  "region": "Самаркандская обл.",
+  "lat": 39.8989,
+  "lon": 66.2561,
+  "radius_km": 5,
+  "aliases": [
+   "Kattaqo'rg'on",
+   "Kattakurgan",
+   "Каттақўрғон"
+  ]
+ },
+ {
+  "name": "Бухара",
+  "region": "Бухарская обл.",
+  "lat": 39.7747,
+  "lon": 64.4286,
+  "radius_km": 8,
+  "aliases": [
+   "Buxoro",
+   "Bukhara",
+   "Бухоро"
+  ]
+ },
+ {
+  "name": "Каган",
+  "region": "Бухарская обл.",
+  "lat": 39.7222,
+  "lon": 64.5517,
+  "radius_km": 4,
+  "aliases": [
+   "Kogon",
+   "Kagan",
+   "Когон"
+  ]
+ },
+ {
+  "name": "Гиждуван",
+  "region": "Бухарская обл.",
+  "lat": 40.1,
+  "lon": 64.6833,
+  "radius_km": 4,
+  "aliases": [
+   "G'ijduvon",
+   "Gijduvon",
+   "Ғиждувон"
+  ]
+ },
+ {
+  "name": "Андижан",
+  "region": "Андижанская обл.",
+  "lat": 40.7821,
+  "lon": 72.3442,
+  "radius_km": 8,
+  "aliases": [
+   "Andijon",
+   "Andijan",
+   "Андижон"
+  ]
+ },
+ {
+  "name": "Асака",
+  "region": "Андижанская обл.",
+  "lat": 40.6414,
+  "lon": 72.2386,
+  "radius_km": 4,
+  "aliases": [
+   "Asaka"
+  ]
+ },
+ {
+  "name": "Ханабад",
+  "region": "Андижанская обл.",
+  "lat": 40.8069,
+  "lon": 72.9819,
+  "radius_km": 4,
+  "aliases": [
+   "Xonobod",
+   "Khanabad",
+   "Хонобод"
+  ]
+ },
+ {
+  "name": "Наманган",
+  "region": "Наманганская обл.",
+  "lat": 40.9983,
+  "lon": 71.6726,
+  "radius_km": 9,
+  "aliases": [
+   "Namangan"
+  ]
+ },
+ {
+  "name": "Чуст",
+  "region": "Наманганская обл.",
+  "lat": 41.0,
+  "lon": 71.2333,
+  "radius_km": 4,
+  "aliases": [
+   "Chust"
+  ]
+ },
+ {
+  "name": "Фергана",
+  "region": "Ферганская обл.",
+  "lat": 40.3864,
+  "lon": 71.7864,
+  "radius_km": 8,
+  "aliases": [
+   "Farg'ona",
+   "Fergana",
+   "Farghona",
+   "Фарғона"
+  ]
+ },
+ {
+  "name": "Коканд",
+  "region": "Ферганская обл.",
+  "lat": 40.5286,
+  "lon": 70.9425,
+  "radius_km": 7,
+  "aliases": [
+   "Qo'qon",
+   "Kokand",
+   "Qoqon",
+   "Қўқон"
+  ]
+ },
+ {
+  "name": "Маргилан",
+  "region": "Ферганская обл.",
+  "lat": 40.4724,
+  "lon": 71.7246,
+  "radius_km": 5,
+  "aliases": [
+   "Marg'ilon",
+   "Margilan",
+   "Марғилон"
+  ]
+ },
+ {
+  "name": "Кувасай",
+  "region": "Ферганская обл.",
+  "lat": 40.2972,
+  "lon": 71.98,
+  "radius_km": 4,
+  "aliases": [
+   "Quvasoy",
+   "Kuvasay",
+   "Қувасой"
+  ]
+ },
+ {
+  "name": "Нукус",
+  "region": "Каракалпакстан",
+  "lat": 42.4531,
+  "lon": 59.6103,
+  "radius_km": 8,
+  "aliases": [
+   "Nukus"
+  ]
+ },
+ {
+  "name": "Ходжейли",
+  "region": "Каракалпакстан",
+  "lat": 42.4047,
+  "lon": 59.4517,
+  "radius_km": 4,
+  "aliases": [
+   "Xo'jayli",
+   "Khojeli",
+   "Хўжайли"
+  ]
+ },
+ {
+  "name": "Беруни",
+  "region": "Каракалпакстан",
+  "lat": 41.6914,
+  "lon": 60.7522,
+  "radius_km": 4,
+  "aliases": [
+   "Beruniy",
+   "Beruni",
+   "Беруний"
+  ]
+ },
+ {
+  "name": "Кунград",
+  "region": "Каракалпакстан",
+  "lat": 43.0758,
+  "lon": 58.9006,
+  "radius_km": 4,
+  "aliases": [
+   "Qo'ng'irot",
+   "Kungrad",
+   "Қўнғирот"
+  ]
+ },
+ {
+  "name": "Ургенч",
+  "region": "Хорезмская обл.",
+  "lat": 41.55,
+  "lon": 60.6333,
+  "radius_km": 7,
+  "aliases": [
+   "Urganch",
+   "Urgench",
+   "Урганч"
+  ]
+ },
+ {
+  "name": "Хива",
+  "region": "Хорезмская обл.",
+  "lat": 41.3783,
+  "lon": 60.3639,
+  "radius_km": 4,
+  "aliases": [
+   "Xiva",
+   "Khiva"
+  ]
+ },
+ {
+  "name": "Карши",
+  "region": "Кашкадарьинская обл.",
+  "lat": 38.8606,
+  "lon": 65.7891,
+  "radius_km": 7,
+  "aliases": [
+   "Qarshi",
+   "Karshi",
+   "Қарши"
+  ]
+ },
+ {
+  "name": "Шахрисабз",
+  "region": "Кашкадарьинская обл.",
+  "lat": 39.0578,
+  "lon": 66.8342,
+  "radius_km": 5,
+  "aliases": [
+   "Shahrisabz",
+   "Shakhrisabz"
+  ]
+ },
+ {
+  "name": "Китаб",
+  "region": "Кашкадарьинская обл.",
+  "lat": 39.1203,
+  "lon": 66.8839,
+  "radius_km": 4,
+  "aliases": [
+   "Kitob",
+   "Kitab",
+   "Китоб"
+  ]
+ },
+ {
+  "name": "Термез",
+  "region": "Сурхандарьинская обл.",
+  "lat": 37.2242,
+  "lon": 67.2783,
+  "radius_km": 7,
+  "aliases": [
+   "Termiz",
+   "Termez",
+   "Термиз"
+  ]
+ },
+ {
+  "name": "Денау",
+  "region": "Сурхандарьинская обл.",
+  "lat": 38.2667,
+  "lon": 67.9,
+  "radius_km": 4,
+  "aliases": [
+   "Denov",
+   "Denau",
+   "Денов"
+  ]
+ },
+ {
+  "name": "Джизак",
+  "region": "Джизакская обл.",
+  "lat": 40.1158,
+  "lon": 67.8422,
+  "radius_km": 6,
+  "aliases": [
+   "Jizzax",
+   "Jizzakh",
+   "Jizzak",
+   "Жиззах",
+   "Джизах"
+  ]
+ },
+ {
+  "name": "Гулистан",
+  "region": "Сырдарьинская обл.",
+  "lat": 40.4897,
+  "lon": 68.7842,
+  "radius_km": 5,
+  "aliases": [
+   "Guliston",
+   "Gulistan",
+   "Гулистон"
+  ]
+ },
+ {
+  "name": "Янгиер",
+  "region": "Сырдарьинская обл.",
+  "lat": 40.275,
+  "lon": 68.8228,
+  "radius_km": 4,
+  "aliases": [
+   "Yangiyer",
+   "Янгиер"
+  ]
+ },
+ {
+  "name": "Навои",
+  "region": "Навоийская обл.",
+  "lat": 40.0844,
+  "lon": 65.3792,
+  "radius_km": 7,
+  "aliases": [
+   "Navoiy",
+   "Navoi",
+   "Навоий"
+  ]
+ },
+ {
+  "name": "Зарафшан",
+  "region": "Навоийская обл.",
+  "lat": 41.5744,
+  "lon": 64.2019,
+  "radius_km": 5,
+  "aliases": [
+   "Zarafshon",
+   "Zarafshan",
+   "Зарафшон"
+  ]
+ }
+]

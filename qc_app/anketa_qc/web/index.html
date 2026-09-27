@@ -31,26 +31,21 @@
     </div>
 
     <nav id="nav">
-      <div class="nav-group">Настройка</div>
-      <a data-page="data"><i class="ico ico-data"></i>Данные</a>
-      <a data-page="columns"><i class="ico ico-columns"></i>Колонки</a>
-      <a data-page="checks"><i class="ico ico-checks"></i>Пороги проверок</a>
-      <a data-page="open"><i class="ico ico-open"></i>Открытые вопросы</a>
-      <a data-page="rules"><i class="ico ico-rules"></i>Логические правила</a>
-      <a data-page="gps"><i class="ico ico-pin"></i>GPS-контроль</a>
-      <a data-page="quotaSetup"><i class="ico ico-quota"></i>Квоты</a>
-      <div class="nav-group">Результаты</div>
-      <a data-page="overview" class="needs-result"><i class="ico ico-overview"></i>Обзор</a>
-      <a data-page="review" class="needs-result"><i class="ico ico-review"></i>Проверка анкет<span class="nav-badge" id="reviewBadge"></span></a>
-      <a data-page="interviewers" class="needs-result"><i class="ico ico-people"></i>Интервьюеры</a>
-      <a data-page="anketas" class="needs-result"><i class="ico ico-list"></i>Анкеты</a>
-      <a data-page="cities" class="needs-result"><i class="ico ico-city"></i>Города</a>
-      <a data-page="quotas" class="needs-result"><i class="ico ico-quota"></i>Выполнение квот</a>
+      <div class="nav-group">Контроль качества</div>
+      <a data-page="overview" class="needs-result"><i class="ico ico-overview"></i>Главная</a>
+      <a data-page="defects" class="needs-result"><i class="ico ico-alert"></i>Брак: где и почему</a>
       <a data-page="map" class="needs-result"><i class="ico ico-pin"></i>Карта GPS</a>
+      <a data-page="interviewers" class="needs-result"><i class="ico ico-people"></i>Интервьюеры</a>
+      <a data-page="quotas" class="needs-result"><i class="ico ico-quota"></i>Выполнение квот</a>
+      <div class="nav-group">Работа с анкетами</div>
+      <a data-page="review" class="needs-result"><i class="ico ico-review"></i>Проверка анкет<span class="nav-badge" id="reviewBadge"></span></a>
+      <a data-page="anketas" class="needs-result"><i class="ico ico-list"></i>Все анкеты</a>
       <a data-page="answers" class="needs-result"><i class="ico ico-quote"></i>Ответы</a>
       <a data-page="repetition" class="needs-result"><i class="ico ico-repeat"></i>Повтор значения</a>
-      <div class="nav-group">Между волнами</div>
-      <a data-page="history"><i class="ico ico-history"></i>История</a>
+      <a data-page="history"><i class="ico ico-history"></i>История волн</a>
+      <div class="nav-group">Проект</div>
+      <a data-page="data"><i class="ico ico-data"></i>Подключение данных</a>
+      <a data-page="setup"><i class="ico ico-checks"></i>Настройка проверки</a>
       <div class="nav-group admin-only">Владелец</div>
       <a data-page="admin" class="admin-only"><i class="ico ico-key"></i>Администрирование</a>
     </nav>
@@ -62,13 +57,17 @@
   <main class="main">
     <header class="toolbar">
       <div>
-        <h1 id="pageTitle">Данные</h1>
+        <h1 id="pageTitle">Контроль качества</h1>
         <div class="toolbar-sub" id="pageSub"></div>
       </div>
       <div class="toolbar-actions">
-        <button class="btn" id="exportBtn" disabled>
+        <button class="btn" id="wordBtn" disabled title="Красивый отчёт, который можно поправить в Word">
+          <svg viewBox="0 0 20 20"><path d="M5 2.5h7l3 3v12H5z"/><path d="M12 2.5v3h3M7.5 10l1 4 1.5-3 1.5 3 1-4"/></svg>
+          Отчёт Word
+        </button>
+        <button class="btn" id="exportBtn" disabled title="Полный отчёт со всеми таблицами">
           <svg viewBox="0 0 20 20"><path d="M10 3v9m0 0l-3.5-3.5M10 12l3.5-3.5M4 14.5V16h12v-1.5"/></svg>
-          Отчёт Excel
+          Excel
         </button>
         <button class="btn primary" id="runBtn">
           <svg viewBox="0 0 20 20"><path d="M6.5 4.5v11l9-5.5z"/></svg>
@@ -112,6 +111,7 @@
 <div class="busy" id="busy" hidden><div class="spinner"></div><div id="busyText">Проверяю анкеты…</div></div>
 
 <script src="/web/vendor/leaflet/leaflet.js"></script>
+<script src="/web/dash.js"></script>
 <script src="/web/app.js"></script>
 </body>
 </html>

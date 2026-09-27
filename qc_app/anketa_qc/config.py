@@ -62,7 +62,17 @@ DEFAULT_CONFIG = {
         "mass_window_min": 10,
         "mass_min_count": 6,
         "phone_missing_city_pct": 20,
+        # «массовое открытие»: столько анкет открыто на одном устройстве за
+        # mass_open_sec секунд — анкеты открыли заранее и заполняют потом
+        "mass_open_sec": 120,
+        "mass_open_count": 3,
     },
+    # Технические записи (видео/фото по заданию, не интервью): колонка и её
+    # значения. Такие записи не проверяются как интервью и не идут в квоты.
+    "technical": {"col": None, "values": []},
+    # Блоки анкеты: [{"name", "start": колонка, "required": bool, "grid": bool}].
+    # Пусто — берутся группы Kobo из заголовков («grp/вопрос»).
+    "sections": [],
     "night": {"enabled": True, "work_start_hour": 7, "work_end_hour": 22, "severity": "warning"},
     "duplicates": {"phone_severity": "defect", "name_severity": "warning"},
     "probing": {
@@ -93,6 +103,11 @@ DEFAULT_CONFIG = {
         "max_speed_kmh": 60,         # «телепорт»: быстрее этого между анкетами не переместиться
         "min_jump_km": 1.0,
         "jump_severity": "warning",
+        # «не в своём городе»: дальше границы города (радиус из справочника
+        # городов или по плановым точкам + запас)
+        "city_check": True,
+        "city_margin_km": 2.0,
+        "city_severity": "defect",
         "plan": {},                  # {город: {"points": [{lat, lon, street_ru}]}}
     },
     "quotas": {"by_city": True, "dims": [], "plan": []},

@@ -79,13 +79,17 @@ def test_conveyor(cfg):
 def test_duplicates(cfg):
     rows = [
         make_row(0, "D1", "A", "2025-09-01 10:00", 10, phone="+998 90 123-45-67", name="Азиз Каримов"),
-        make_row(1, "D2", "B", "2025-09-01 11:00", 10, phone="901234567", name="каримов азиз"),
+        make_row(1, "D2", "B", "2025-09-01 11:00", 10, phone="901234567", name="Нигора Алиева"),
         make_row(2, "D3", "C", "2025-09-01 12:00", 10, phone="999999999", name="Азиз"),
         make_row(3, "D4", "D", "2025-09-01 13:00", 10, phone="999999999", name="Азиз"),
+        make_row(4, "D1", "A", "2025-09-01 14:00", 10, phone="+998 91 000-11-22", name="каримов азиз"),
+        make_row(5, "D5", "E", "2025-09-01 15:00", 10, phone="+998 93 222-33-44", name="Азиз Каримов"),
     ]
     df = engine.run(pd.DataFrame(rows), cfg)["df"].set_index("row_id")
     assert any(c == "dup_phone" for c, _, _ in df.loc["1000", "issues"])
-    assert any(c == "dup_name" for c, _, _ in df.loc["1001", "issues"])
+    # то же ФИО у того же интервьюера — дубликат; тёзка у другого интервьюера — нет
+    assert any(c == "dup_name" for c, _, _ in df.loc["1004", "issues"])
+    assert not any(c == "dup_name" for c, _, _ in df.loc["1005", "issues"])
     # заглушки телефона и одно имя без фамилии — не дубликаты
     assert not df.loc["1002", "issues"]
 
@@ -293,3 +297,86 @@ def test_risk_score():
     # два средних сигнала складываются: 1 − 0.6·0.5 = 0.7
     assert engine.risk_score([("start_gap", "defect", ""), ("too_short", "defect", "")]) == 70
     assert engine.risk_score([("rule:X", "warning", "")]) == 25
+
+
+def _codes(res):
+    return {rid: {c for c, _, _ in xs} for rid, xs in res["df"].set_index("row_id")["issues"].items()}
+
+
+def test_overlap_and_mass_open(cfg):
+    # 3 анкеты открыты за минуту и заполняются параллельно, потом честная анкета
+    rows = [make_row(0, "D1", "A", "2025-09-01 10:00:00", 15),
+            make_row(1, "D1", "A", "2025-09-01 10:00:30", 25),
+            make_row(2, "D1", "A", "2025-09-01 10:01:00", 35),
+            make_row(3, "D1", "A", "2025-09-01 11:00:00", 15),
+            make_row(4, "D2", "B", "2025-09-01 10:00:00", 15),
+            make_row(5, "D2", "B", "2025-09-01 10:20:00", 15)]
+    codes = _codes(engine.run(pd.DataFrame(rows), cfg))
+    assert {"overlap", "mass_open"} <= codes["1001"] and {"overlap", "mass_open"} <= codes["1002"]
+    assert "overlap" not in codes["1000"] and "mass_open" in codes["1000"]
+    assert not codes["1003"] and not codes["1004"] and not codes["1005"]
+    # отрицательный «отдых» — это наложение, а не «нет перерыва»
+    assert "no_rest" not in codes["1001"]
+
+
+def test_technical_records_skip_interview_checks(cfg):
+    rows = [make_row(0, "D1", "A", "2025-09-01 10:00", 15),
+            make_row(1, "D1", "A", "2025-09-01 10:16", 1),     # видео по заданию: 1 минута
+            make_row(2, "D1", "A", "2025-09-01 10:22", 15)]
+    for r, kind in zip(rows, ["Интервью", "Техническое задание (видео)", "Интервью"]):
+        r["Тип записи"] = kind
+    df_in = pd.DataFrame(rows)
+    from anketa_qc import blocks
+    hint = blocks.suggest_technical(df_in)
+    assert hint and hint[0]["col"] == "Тип записи" and hint[0]["values"] == ["Техническое задание (видео)"]
+    # без настройки видео — «короткая анкета» и «нет перерыва»
+    codes = _codes(engine.run(df_in, cfg))
+    assert {"too_short", "no_rest"} <= codes["1001"]
+    cfg["technical"] = {"col": "Тип записи", "values": ["Техническое задание (видео)"]}
+    res = engine.run(df_in, cfg)
+    codes = _codes(res)
+    assert not codes["1001"] and not codes["1002"]
+    df = res["df"].set_index("row_id")
+    assert df.loc["1001", "technical"] and not df.loc["1001", "completed"]
+
+
+def test_out_of_city_and_region(cfg):
+    rows = [make_row(0, "D1", "A", "2025-09-01 10:00", 15, city="Самарканд"),
+            make_row(1, "D1", "A", "2025-09-01 12:00", 15, city="Самарканд"),
+            make_row(2, "D2", "B", "2025-09-01 12:00", 15, city="Qarshi shahri")]
+    rows[0]["lat"], rows[0]["lon"] = 39.655, 66.96          # центр Самарканда
+    rows[1]["lat"], rows[1]["lon"] = 39.8989, 66.2561       # это Каттакурган
+    rows[2]["lat"], rows[2]["lon"] = 38.86, 65.79
+    df_in = pd.DataFrame(rows)
+    cfg["mapping"] = config.suggest_mapping(list(df_in.columns))
+    cfg["mapping"].update(lat="lat", lon="lon")
+    res = engine.run(df_in, cfg)
+    codes = _codes(res)
+    assert "geo_city" in codes["1001"] and "geo_city" not in codes["1000"] and "geo_city" not in codes["1002"]
+    text = next(t for c, _, t in res["df"].set_index("row_id").loc["1001", "issues"] if c == "geo_city")
+    assert "Каттакурган" in text
+    df = res["df"].set_index("row_id")
+    assert df.loc["1000", "region"] == "Самаркандская обл." and df.loc["1002", "region"] == "Кашкадарьинская обл."
+    assert res["geo"]["out_city"] == 1
+
+
+def test_sections_blocks_required_and_grid(cfg):
+    rows = []
+    for i in range(3):
+        r = make_row(i, "D1", "A", f"2025-09-01 1{i}:00", 15, name=["Азиз Каримов", "Нигора Алиева", "Бобур Олимов"][i])
+        for k in range(5):
+            r[f"grp_brand/g{k}"] = "Знаю" if i == 1 else (None if i == 2 else ["Знаю", "Не знаю"][k % 2])
+        rows.append(r)
+    df_in = pd.DataFrame(rows)
+    from anketa_qc import blocks
+    auto = blocks.build_sections(df_in.columns, {"sections": []})
+    assert [s["name"] for s in auto] == ["Brand"]
+    cfg["completed_cols"] = ["Скажите пожалуйста как вас зовут?"]
+    cfg["sections"] = [{"name": "Знание брендов", "start": "grp_brand/g0", "required": True, "grid": True}]
+    res = engine.run(df_in, cfg)
+    df = res["df"].set_index("row_id")
+    codes = _codes(res)
+    assert "grid_same" in codes["1001"] and "block_empty" in codes["1002"] and not codes["1000"]
+    i = [c for c, _, _ in df.loc["1002", "issues"]].index("block_empty")
+    assert df.loc["1002", "blocks"][i] == "Знание брендов"
+    assert df.loc["1002", "primary"] == "block_empty"

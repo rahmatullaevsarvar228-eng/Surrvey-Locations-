@@ -166,13 +166,16 @@ def client_report(result, clean, todo, quota, project, source, decisions_summary
     return _to_bytes(build)
 
 
-def clean_report(clean, todo):
+def clean_report(clean, todo, technical=None):
     """Чистая база для заказчика: только принятые и анкеты без замечаний, все
-    исходные колонки. Нерешённые подозрительные — отдельным листом."""
+    исходные колонки. Нерешённые подозрительные и технические записи —
+    отдельными листами."""
     def build(writer):
         write_sheet(writer, "Чистая база", clean)
         if len(todo):
             write_sheet(writer, "Не решено", todo, row_status=["YELLOW"] * len(todo))
+        if technical is not None and len(technical):
+            write_sheet(writer, "Технические записи", technical)
     return _to_bytes(build)
 
 

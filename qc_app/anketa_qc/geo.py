@@ -9,7 +9,10 @@
   - нет координат в анкете;
   - «телепорт»: между соседними анкетами интервьюера он переместился быстрее,
     чем реально можно (по умолчанию > 60 км/ч и дальше 1 км);
-  - у каждой плановой точки может быть свой радиус и своя квота анкет.
+  - у каждой плановой точки может быть свой радиус и своя квота анкет;
+  - «не в своём городе»: анкета дальше границы города, указанного в анкете
+    (центр и радиус — из справочника городов Узбекистана или по плановым
+    точкам города).
 
 План точек хранится в настройках проекта: {город: {"points": [{lat, lon,
 street_ru}]}}. Встроенный план (14 городов, 97 точек) — из geo_app.py.
@@ -23,10 +26,80 @@ import pandas as pd
 
 EARTH_RADIUS_KM = 6371.0088
 DEFAULT_PLAN_FILE = Path(__file__).resolve().parent / "geo_plan_default.json"
+CITIES_FILE = Path(__file__).resolve().parent / "cities_uz.json"
 
 
 def default_plan():
     return json.loads(DEFAULT_PLAN_FILE.read_text(encoding="utf-8"))
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Справочник городов: центр, радиус, регион
+# ─────────────────────────────────────────────────────────────────────────
+_PREFIX = re.compile(r"^(г\.|гор\.|город|shahar|shahri|sh\.)\s*")
+_SUFFIX = re.compile(r"\s+(shahri|shahar|sh\.|шаҳри|шахри|шаҳар|city|г\.)$")
+
+
+def norm_city(v):
+    s = str(v or "").strip().lower().replace("ё", "е")
+    s = re.sub(r"[ʻʼ’'`‘]", "", s)
+    s = _SUFFIX.sub("", _PREFIX.sub("", s)).strip()
+    return re.sub(r"\s+", " ", s)
+
+
+_GAZ = None
+
+
+def gazetteer():
+    global _GAZ
+    if _GAZ is None:
+        items = json.loads(CITIES_FILE.read_text(encoding="utf-8"))
+        index = {}
+        for it in items:
+            for alias in [it["name"]] + it.get("aliases", []):
+                index.setdefault(norm_city(alias), it)
+        _GAZ = (items, index)
+    return _GAZ
+
+
+def find_city(name):
+    items, index = gazetteer()
+    key = norm_city(name)
+    if not key:
+        return None
+    if key in index:
+        return index[key]
+    # «Ташкент (Юнусабад)», «Самарканд-2» и т.п.
+    head = re.split(r"[\s(,\-–/]", key)[0]
+    return index.get(head)
+
+
+def region_of(city):
+    it = find_city(city)
+    return it["region"] if it else (city or "—")
+
+
+def city_bounds(city, plan_points, point_radius_km, margin_km):
+    """(lat, lon, радиус км) границы города или None, если город неизвестен
+    и плановых точек нет."""
+    it = find_city(city)
+    if plan_points:
+        p_lat = np.array([float(p["lat"]) for p in plan_points])
+        p_lon = np.array([float(p["lon"]) for p in plan_points])
+        c_lat, c_lon = (it["lat"], it["lon"]) if it else (float(p_lat.mean()), float(p_lon.mean()))
+        reach = float(np.max(haversine_km(c_lat, c_lon, p_lat, p_lon))) + point_radius_km
+        radius = max(reach, it["radius_km"] if it else 0.0)
+        return c_lat, c_lon, radius + margin_km
+    if it:
+        return it["lat"], it["lon"], it["radius_km"] + margin_km
+    return None
+
+
+def nearest_city(lat, lon):
+    items, _ = gazetteer()
+    d = haversine_km(lat, lon, np.array([i["lat"] for i in items]), np.array([i["lon"] for i in items]))
+    k = int(np.argmin(d))
+    return items[k]["name"], float(d[k]), float(d[k]) <= items[k]["radius_km"]
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -123,18 +196,49 @@ def check(df, cfg, add):
         df.loc[grp.index, "geo_radius"] = radius[best]
         # «не на месте» — анкета не попала в радиус ни одной точки своего города
         df.loc[grp.index, "geo_far"] = ~inside.any(axis=1)
+        interview = ~grp["technical"].to_numpy()
         for k, p in enumerate(pts):
-            mine = grp[best == k]
-            n_in = int(inside[best == k, k].sum())
+            sel = (best == k) & interview
+            mine = grp[sel]
+            n_in = int(inside[sel, k].sum())
             quota = int(p["quota"]) if str(p.get("quota") or "").strip().isdigit() else None
             point_stats.append({
                 "Город": found[0], "Точка": labels[k], "Радиус, км": round(float(radius[k]), 2),
                 "Анкет": n_in, "Квота": quota,
-                "Интервьюеров": int(mine[inside[best == k, k]]["inter"].nunique()),
+                "Интервьюеров": int(mine[inside[sel, k]]["inter"].nunique()),
                 "Статус": "RED" if quota is not None and n_in > quota else ("GREEN" if n_in else "YELLOW"),
                 "lat": float(p["lat"]), "lon": float(p["lon"]),
             })
-    far = df["geo_far"].astype(bool)
+    # --- «не в своём городе» ------------------------------------------------
+    df["geo_city_out"] = False
+    df["geo_city_text"] = None
+    city_unknown = set()
+    if g.get("city_check", True):
+        margin = float(g.get("city_margin_km", 2.0))
+        for city, grp in df[has_gps & df["city"].notna()].groupby("city"):
+            found = plan.get(str(city).strip().lower())
+            b = city_bounds(city, found[1] if found else None, max_dist, margin)
+            if b is None:
+                city_unknown.add(city)
+                continue
+            c_lat, c_lon, radius = b
+            d = haversine_km(grp["lat"].to_numpy(), grp["lon"].to_numpy(), c_lat, c_lon)
+            for i, km in zip(grp.index[d > radius], d[d > radius]):
+                near, near_km, inside = nearest_city(df.at[i, "lat"], df.at[i, "lon"])
+                if norm_city(near) == norm_city(city) or find_city(near) is find_city(city):
+                    where = "за чертой города"
+                elif inside:
+                    where = f"это территория города {near}"
+                else:
+                    where = f"ближайший город — {near} ({near_km:.0f} км)"
+                df.at[i, "geo_city_out"] = True
+                df.at[i, "geo_city_text"] = (f"в анкете город {city}, а координаты в {km:.0f} км от его центра "
+                                             f"(граница ≈ {radius:.0f} км); {where}")
+    city_out = df["geo_city_out"].astype(bool)
+    add(city_out, "geo_city", g.get("city_severity", "defect"), lambda i: df.at[i, "geo_city_text"])
+
+    # вне города — это уже сильнее, чем «далеко от точки»: не дублируем
+    far = df["geo_far"].astype(bool) & ~city_out
     add(far, "geo_far", g.get("far_severity", "warning"),
         lambda i: f"в {df.at[i, 'geo_dist']:.1f} км от ближайшей точки опроса «{df.at[i, 'geo_point']}» "
                   f"(допустимо {df.at[i, 'geo_radius']:g} км)")
@@ -144,7 +248,7 @@ def check(df, cfg, add):
     min_sep = float(g.get("min_sep_km", 1.5))
     clusters = []
     df["geo_cluster_n"] = 0
-    for (city, inter), grp in df[has_gps].sort_values("start").groupby(["city", "inter"]):
+    for (city, inter), grp in df[has_gps & ~df["technical"]].sort_values("start").groupby(["city", "inter"]):
         lbl, centers = cluster(grp["lat"].to_numpy(), grp["lon"].to_numpy(), min_sep)
         for k, (c_lat, c_lon, n) in enumerate(centers):
             idx = grp.index[np.array(lbl) == k]
@@ -160,9 +264,9 @@ def check(df, cfg, add):
     same_min = int(g.get("same_point_min", 3))
     key = df["lat"].round(5).astype(str) + "," + df["lon"].round(5).astype(str)
     df["geo_same_n"] = 0
-    gps = df[has_gps]
+    gps = df[has_gps & ~df["technical"]]
     if len(gps):
-        df.loc[gps.index, "geo_same_n"] = gps.groupby([gps["inter"].fillna("—"), key[has_gps]])["row_id"].transform("size")
+        df.loc[gps.index, "geo_same_n"] = gps.groupby([gps["inter"].fillna("—"), key[gps.index]])["row_id"].transform("size")
     add(df["geo_same_n"] >= same_min, "geo_same", g.get("same_severity", "warning"),
         lambda i: f"точно такие же координаты ещё в {int(df.at[i, 'geo_same_n']) - 1} анкет(ах) "
                   f"этого интервьюера — похоже на копирование или подмену GPS")
@@ -189,19 +293,21 @@ def check(df, cfg, add):
     points = [{
         "id": r.row_id, "city": r.city, "inter": r.inter, "lat": round(float(r.lat), 6), "lon": round(float(r.lon), 6),
         "dist": None if pd.isna(r.geo_dist) else round(float(r.geo_dist), 2), "point": r.geo_point,
-        "far": bool(r.geo_far),
+        "far": bool(r.geo_far and not r.geo_city_out), "out_city": bool(r.geo_city_out),
+        "technical": bool(r.technical),
         "cluster": bool(r.geo_cluster_n > max_per_point), "same": bool(r.geo_same_n >= same_min),
         "jump": r.geo_jump is not None, "start": None if pd.isna(r.start) else r.start.strftime("%d.%m %H:%M"),
     } for r in df[has_gps].itertuples()]
     return {
         "enabled": True,
         "with_gps": int(has_gps.sum()), "without_gps": int((~has_gps).sum()),
-        "far": int(far.sum()), "clusters_over": sum(1 for c in clusters if c["Статус"] == "RED"),
+        "far": int(far.sum()), "out_city": int(city_out.sum()), "clusters_over": sum(1 for c in clusters if c["Статус"] == "RED"),
         "same": int((df["geo_same_n"] >= same_min).sum()),
         "jumps": int(df["geo_jump"].notna().sum()), "max_speed_kmh": max_speed,
         "point_stats": point_stats,
         "max_dist_km": max_dist, "max_per_point": max_per_point, "min_sep_km": min_sep,
         "unmatched_cities": sorted(map(str, unmatched)),
+        "unknown_cities": sorted(map(str, city_unknown)),
         "plan": {city: data for city, data in (g.get("plan") or {}).items()},
         "points": points,
         "clusters": sorted(clusters, key=lambda c: -c["Анкет"]),

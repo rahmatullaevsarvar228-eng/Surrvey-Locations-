@@ -92,7 +92,7 @@ class Session:
         df = self.sheets.get(self.config.get("sheet"))
         return list(df.columns) if df is not None else []
 
-    def export_bytes(self, kind):
+    def export_bytes(self, kind, filters=None):
         """(имя файла, байты) для выгрузки — общий код для кнопки в браузере и
         для диалога «Сохранить как» в окне приложения."""
         stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
@@ -130,9 +130,21 @@ class Session:
                 q = None
             return f"otchet_zakazchiku_{slug}_{stamp}.xlsx", export.client_report(
                 r, clean, todo, q, self.project, self.source_label, counts)
+        if kind == "word":
+            from . import word
+            filters = {k: v for k, v in (filters or {}).items() if k in ("region", "city", "inter") and v}
+            dec = self.decisions_by_pos()
+            try:
+                q = quotas.compute(r, self.config, dec)
+            except ValueError:
+                q = None
+            suffix = "_" + re.sub(r"[^0-9A-Za-zА-Яа-яЁё]+", "_", "_".join(filters.values()))[:30] if filters else ""
+            return f"otchet_KK_{slug}{suffix}_{stamp}.docx", word.build(
+                r, self.config, dec, self.project, self.source_label, q,
+                user=(self.user or {}).get("name") or (self.user or {}).get("login"), filters=filters)
         if kind == "clean":
             clean, todo = review.clean_base(r, self.decisions_by_pos())
-            return f"chistaya_baza_{slug}_{stamp}.xlsx", export.clean_report(clean, todo)
+            return f"chistaya_baza_{slug}_{stamp}.xlsx", export.clean_report(clean, todo, review.technical_rows(r))
         raise ValueError(f"Неизвестный отчёт: {kind}")
 
 
@@ -173,8 +185,15 @@ def result_payload(sess):
     r, cfg = sess.result, sess.config
     df = r["df"]
     n = len(df)
+    n_tech = int(df["technical"].sum())
+    n_iv = n - n_tech
     n_def = int(df["is_defect"].sum())
     dec = sess.decisions_by_pos()
+    has_geo = "geo_point" in df.columns
+
+    def issues_of(x):
+        return [[c, sev, b, engine.short_label(c), txt] for (c, sev, txt), b in zip(x.issues, x.blocks)]
+
     anketas = [{
         "pos": int(x.pos), "decision": (dec.get(x.pos) or {}).get("decision") or "",
         "decision_comment": (dec.get(x.pos) or {}).get("comment") or "",
@@ -185,20 +204,30 @@ def result_payload(sess):
         "defect": bool(x.is_defect), "warning": bool(x.is_warning),
         "reasons": x.reason_text, "warnings": x.warning_text,
         "risk": int(x.risk),
+        "technical": bool(x.technical), "completed": bool(x.completed), "region": x.region,
+        "date": None if pd.isna(x.start) else x.start.strftime("%Y-%m-%d"),
+        "hour": None if pd.isna(x.start) else int(x.start.hour),
+        "lat": _clean(x.lat), "lon": _clean(x.lon),
+        "point": (_clean(x.geo_point) if has_geo else None), "dist": (_clean(round(x.geo_dist, 2)) if has_geo else None),
+        "primary": _clean(x.primary), "issues": issues_of(x),
     } for x in df.itertuples()]
 
     cities = []
     for city, g in df.groupby("city"):
         nd = int(g["is_defect"].sum())
-        pct = round(nd / len(g) * 100, 1)
-        cities.append({"Город": city, "Анкет": len(g), "Интервьюеров": int(g["inter"].nunique()),
+        n_city = int((~g["technical"]).sum())
+        pct = round(nd / max(n_city, 1) * 100, 1)
+        cities.append({"Город": city, "Регион": g["region"].iloc[0], "Анкет": n_city,
+                       "Интервьюеров": int(g["inter"].nunique()),
                        "Брак": nd, "% брака": pct,
                        "Статус": engine.status_for_pct(pct, cfg["status"]["red_pct"], cfg["status"]["yellow_pct"])})
 
     inter_status = [x["Статус"] for x in r["interviewers"]]
     return {
         "summary": {
-            "total": n, "defects": n_def, "defect_pct": round(n_def / max(n, 1) * 100, 1),
+            "total": n, "interviews": n_iv, "technical": n_tech,
+            "completed": int(df["completed"].sum()),
+            "defects": n_def, "defect_pct": round(n_def / max(n_iv, 1) * 100, 1),
             "warnings": int(df["is_warning"].sum()),
             "cities": int(df["city"].nunique()), "interviewers": int(df["inter"].nunique()),
             "dropped": r["n_dropped"], "period": engine.data_period(df),
@@ -209,7 +238,7 @@ def result_payload(sess):
             "review": {
                 "enabled": bool(sess.source_names) and bool(cfg["mapping"].get("id")),
                 "can_decide": (sess.user or {}).get("role") in ("lead", "admin"),
-                "todo": sum(1 for a in anketas if (a["defect"] or a["warning"]) and not a["decision"]),
+                "todo": sum(1 for a in anketas if (a["defect"] or a["warning"]) and not a["decision"] and not a["technical"]),
                 **{d: sum(1 for a in anketas if a["decision"] == d) for d in review.DECISIONS},
             },
         },
@@ -223,6 +252,9 @@ def result_payload(sess):
         "answers": _records(r["answers"]["all"]),
         "rule_errors": r["rule_errors"],
         "legend": engine.status_legend(cfg),
+        "sections": r.get("sections", []),
+        "labels": {**engine.SHORT_LABELS, **{c: engine.short_label(c) for c in df["primary"].dropna().unique()}},
+        "status_cfg": cfg["status"],
         "geo": r.get("geo") or {"enabled": False},
         "quotas": _quotas_safe(sess),
     }
@@ -446,6 +478,8 @@ def create_app(data_dir, client_factory=RemoteClient):
             "sheets": list(sess.sheets),
             "columns": cols,
             "suggested": config.suggest_mapping(cols, sess.config["mapping"]) if cols else {},
+            "technical_hint": _technical_hint(sess),
+            "sections_auto": _sections_auto(sess),
             "has_result": sess.result is not None,
             "waves": sess.store.list_waves(sess.project),
             "user": sess.user,
@@ -549,6 +583,15 @@ def create_app(data_dir, client_factory=RemoteClient):
                 errors.append(str(e))
         return fail(errors[0] if errors else "Пустой файл")
 
+    @app.get("/api/column/values")
+    def column_values():
+        df = sess.sheets.get(sess.config.get("sheet"))
+        col = request.args.get("col", "")
+        if df is None or col not in df.columns:
+            return jsonify([])
+        vc = df[col].dropna().map(lambda v: str(v).strip()).value_counts().head(40)
+        return jsonify([{"value": k, "n": int(v)} for k, v in vc.items() if k])
+
     @app.get("/api/preview")
     def preview():
         df = sess.sheets.get(sess.config.get("sheet"))
@@ -599,12 +642,13 @@ def create_app(data_dir, client_factory=RemoteClient):
     @app.get("/api/export/<kind>")
     def export_file(kind):
         try:
-            name, data = sess.export_bytes(kind)
+            name, data = sess.export_bytes(kind, request.args.to_dict())
         except ValueError as e:
             return fail(str(e))
         import io
-        return send_file(io.BytesIO(data), as_attachment=True, download_name=name,
-                         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        mime = ("application/vnd.openxmlformats-officedocument.wordprocessingml.document" if name.endswith(".docx")
+                else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        return send_file(io.BytesIO(data), as_attachment=True, download_name=name, mimetype=mime)
 
     @app.get("/api/history")
     def history_get():
@@ -627,6 +671,21 @@ def create_app(data_dir, client_factory=RemoteClient):
         return jsonify(_history_payload(sess))
 
     return app
+
+
+def _technical_hint(sess):
+    from .blocks import suggest_technical
+    df = sess.sheets.get(sess.config.get("sheet"))
+    return suggest_technical(df) if df is not None else []
+
+
+def _sections_auto(sess):
+    from .blocks import build_sections
+    df = sess.sheets.get(sess.config.get("sheet"))
+    if df is None:
+        return []
+    return [{"name": x["name"], "start": x["columns"][0], "n": len(x["columns"])}
+            for x in build_sections(df.columns, {"sections": []})]
 
 
 def _history_payload(sess):

@@ -37,7 +37,7 @@ ISSUE_LABELS = {
     "conveyor": "«Конвейер» — много анкет подряд за короткое окно на одном устройстве",
     "night": "Анкета в нетипичное время суток",
     "dup_phone": "Дубликат респондента: тот же телефон",
-    "dup_name": "Дубликат респондента: то же ФИО",
+    "dup_name": "Дубликат респондента: то же ФИО у того же интервьюера",
     "probe_depth": "Мало ответов в открытом вопросе (слабый зондаж «А ещё?»)",
     "probe_low_avg": "У интервьюера мало ответов в открытых вопросах относительно медианы волны",
     "no_gps": "Нет GPS-координат",
@@ -45,7 +45,45 @@ ISSUE_LABELS = {
     "geo_cluster": "Скопление: слишком много анкет интервьюера в одном месте",
     "geo_same": "Одинаковые GPS-координаты в разных анкетах интервьюера",
     "geo_jump": "«Телепорт»: слишком быстрое перемещение между анкетами",
+    "geo_city": "Анкета сделана не в своём городе",
+    "overlap": "Анкета открыта, когда предыдущая ещё не закончена",
+    "mass_open": "Массовое открытие анкет за короткое время",
+    "block_empty": "Обязательный блок не заполнен",
+    "grid_same": "Во всём блоке-сетке один и тот же ответ",
 }
+
+# Короткие понятные названия для дашбордов и отчёта.
+SHORT_LABELS = {
+    "no_device": "Нет Device ID",
+    "device_multi_inter": "Устройство у разных интервьюеров",
+    "inter_multi_device": "Интервьюер на разных устройствах",
+    "too_long": "Слишком долгое интервью",
+    "too_short": "Слишком короткое интервью",
+    "start_gap": "Анкеты одна за другой",
+    "no_rest": "Нет перерыва между анкетами",
+    "conveyor": "Конвейер анкет",
+    "overlap": "Две анкеты одновременно",
+    "mass_open": "Массовое открытие анкет",
+    "night": "Нерабочее время",
+    "dup_phone": "Повтор телефона",
+    "dup_name": "Повтор ФИО",
+    "probe_depth": "Мало ответов в открытом вопросе",
+    "probe_low_avg": "Слабый зондаж у интервьюера",
+    "block_empty": "Пустой обязательный блок",
+    "grid_same": "Одинаковые ответы в сетке",
+    "no_gps": "Нет GPS",
+    "geo_far": "Далеко от точки опроса",
+    "geo_city": "Не в своём городе",
+    "geo_cluster": "Скопление анкет в одном месте",
+    "geo_same": "Одинаковые координаты",
+    "geo_jump": "«Телепорт»",
+}
+
+
+def short_label(code):
+    if code.startswith("rule:"):
+        return f"Правило «{code[5:]}»"
+    return SHORT_LABELS.get(code) or ISSUE_LABELS.get(code, code)
 
 # Система раннего предупреждения (из main.py) — одна шкала для всех проверок.
 STATUS_LEVELS = {
@@ -64,11 +102,24 @@ STATUS_LEVELS = {
 # говорит о фальсификации. Балл анкеты = 100 × (1 − Π(1 − вес)) — несколько
 # слабых сигналов складываются, один сильный уже даёт высокий балл.
 RISK_WEIGHTS = {
-    "conveyor": 0.7, "geo_same": 0.7, "geo_jump": 0.6, "dup_phone": 0.6,
+    "conveyor": 0.7, "geo_same": 0.7, "geo_city": 0.7, "overlap": 0.6, "mass_open": 0.6,
+    "block_empty": 0.5, "grid_same": 0.3, "geo_jump": 0.6, "dup_phone": 0.6,
     "no_device": 0.5, "too_short": 0.5, "start_gap": 0.4, "geo_far": 0.4, "no_rest": 0.35,
     "night": 0.3, "dup_name": 0.3, "probe_low_avg": 0.3, "geo_cluster": 0.3,
     "too_long": 0.2, "probe_depth": 0.2, "device_multi_inter": 0.2, "no_gps": 0.15, "inter_multi_device": 0.1,
 }
+
+
+def primary_issue(issues):
+    """Главная причина анкеты: самый сильный сигнал брака, а если брака нет —
+    самое сильное предупреждение. Нужна, чтобы в дашбордах каждая анкета
+    считалась один раз."""
+    best = None
+    for code, sev, _ in issues:
+        key = (sev == DEFECT, RISK_WEIGHTS.get(code, 0.5 if sev == DEFECT else 0.25))
+        if best is None or key > best[0]:
+            best = (key, code)
+    return best[1] if best else None
 
 
 def risk_score(issues):
@@ -170,11 +221,14 @@ def prepare(raw, cfg):
     else:
         df["lat"] = df["lon"] = np.nan
 
+    from .blocks import technical_mask
+    df["technical"] = technical_mask(raw, cfg)
     done_cols = [c for c in cfg.get("completed_cols") or [] if c in raw.columns]
     if done_cols:
         df["completed"] = (~raw[done_cols].apply(_is_blank)).any(axis=1)
     else:
         df["completed"] = True
+    df["completed"] &= ~df["technical"]     # техническая запись — не интервью
 
     keep = (df["deviceid"].notna() | df["inter"].notna()) & df["city"].notna()
     n_dropped = int((~keep).sum())
@@ -331,6 +385,15 @@ def _fmt_list(items, limit=5):
     return ", ".join(items[:limit]) + f" и ещё {len(items) - limit}"
 
 
+def plural(n, one, few, many):
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
 def normalize_phone(v):
     digits = re.sub(r"\D", "", str(v)) if v is not None else ""
     if len(digits) < 7 or len(set(digits)) == 1:
@@ -362,6 +425,9 @@ def run(raw_input, cfg):
         df[f"probe_{i}"] = raw[cols].apply(lambda col: col.map(answer_filter.is_valid)).sum(axis=1)
 
     df = df.sort_values(["deviceid", "start"], na_position="last").reset_index(drop=True)
+    from .geo import region_of
+    regions = {c: region_of(c) for c in df["city"].dropna().unique()}
+    df["region"] = df["city"].map(regions).fillna("—")
     issues = [[] for _ in range(len(df))]
 
     def add(mask, code, severity, text_fn):
@@ -384,30 +450,64 @@ def run(raw_input, cfg):
         lambda i: f"1 код интервьюера → {len(multi_code[df.at[i, 'inter']])} устройств "
                   f"({_fmt_list(multi_code[df.at[i, 'inter']])})")
 
+    # Технические записи (видео/фото по заданию) — не интервью: проверки
+    # длительности, интервалов, «конвейера», дубликатов, зондажа и правил к
+    # ним не применяются.
+    iv = ~df["technical"]
+
     # --- Длительность --------------------------------------------------------
     dur = df["duration_min"]
-    add(dur > t["max_duration_min"], "too_long", DEFECT,
+    add((dur > t["max_duration_min"]) & iv, "too_long", DEFECT,
         lambda i: f"анкета длилась {dur[i]:.0f} мин (> {t['max_duration_min']})")
     # Короткими обязаны быть скринауты — порог только для завершённых интервью.
     add((dur < t["min_duration_min"]) & dur.notna() & df["completed"], "too_short", DEFECT,
         lambda i: f"интервью длилось {dur[i]:.1f} мин (< {t['min_duration_min']})")
 
     # --- Интервал между стартами и «отдых» ----------------------------------
-    df["gap_min"] = df.groupby("deviceid")["start"].diff().dt.total_seconds() / 60
+    # Только среди интервью: техническая запись между двумя интервью не
+    # должна делать следующее интервью «слишком быстрым».
+    ivs = df[iv]
+    by_dev = ivs.groupby("deviceid")
+    df["gap_min"] = (by_dev["start"].diff().dt.total_seconds() / 60).reindex(df.index)
     add((df["gap_min"] < t["min_interval_min"]) & df["gap_min"].notna(), "start_gap", DEFECT,
         lambda i: f"интервал с предыдущей анкетой {df.at[i, 'gap_min']:.1f} мин (< {t['min_interval_min']})")
     # Не то же самое, что интервал между стартами: после длинной анкеты старты
     # могут быть далеко друг от друга, а реального перерыва не было.
-    prev_end = df.groupby("deviceid")["end"].shift(1)
+    prev_end = by_dev["end"].shift(1).reindex(df.index)
+    prev_id = by_dev["row_id"].shift(1).reindex(df.index)
     df["rest_min"] = (df["start"] - prev_end).dt.total_seconds() / 60
-    add((df["rest_min"] < t["min_interval_min"]) & df["rest_min"].notna(), "no_rest", DEFECT,
+    add((df["rest_min"] >= 0) & (df["rest_min"] < t["min_interval_min"]), "no_rest", DEFECT,
         lambda i: f"начал следующую анкету через {df.at[i, 'rest_min']:.1f} мин после завершения "
                   f"предыдущей (< {t['min_interval_min']})")
+    # Анкета открыта раньше, чем закончена предыдущая на том же устройстве —
+    # несколько анкет заполнялись параллельно.
+    add(df["rest_min"] < 0, "overlap", DEFECT,
+        lambda i: f"открыта в {df.at[i, 'start']:%H:%M}, а предыдущая анкета {prev_id[i]} на этом устройстве "
+                  f"закончена только в {prev_end[i]:%H:%M} — наложение {-df.at[i, 'rest_min']:.0f} мин")
+
+    # --- Массовое открытие: несколько анкет открыты почти одновременно ------
+    open_sec, open_n = float(t.get("mass_open_sec", 120)), int(t.get("mass_open_count", 3))
+    opened = pd.Series(0, index=df.index)
+    for _, g in ivs[ivs["deviceid"].notna() & ivs["start"].notna()].groupby("deviceid"):
+        if len(g) < open_n:
+            continue
+        starts = g["start"].reset_index(drop=True)
+        idxs = g.index.to_numpy()
+        for k in range(len(g)):
+            in_win = ((starts >= starts.iloc[k]) &
+                      (starts <= starts.iloc[k] + pd.Timedelta(seconds=open_sec))).to_numpy()
+            cnt = int(in_win.sum())
+            if cnt >= open_n:
+                for j in idxs[in_win]:
+                    opened[j] = max(opened[j], cnt)
+    add(opened >= open_n, "mass_open", DEFECT,
+        lambda i: f"{int(opened[i])} {plural(opened[i], 'анкета открыта', 'анкеты открыты', 'анкет открыто')} на одном устройстве в пределах {open_sec / 60:g} мин "
+                  f"(с {df.at[i, 'start']:%H:%M}) — анкеты открывают заранее и заполняют без респондента")
 
     # --- «Конвейер» — только pandas-сравнения, без np.datetime64 ------------
     window, min_count = t["mass_window_min"], t["mass_min_count"]
     burst = pd.Series(0, index=df.index)
-    for _, g in df[df["deviceid"].notna() & df["start"].notna()].groupby("deviceid"):
+    for _, g in ivs[ivs["deviceid"].notna() & ivs["start"].notna()].groupby("deviceid"):
         if len(g) < min_count:
             continue
         starts = g["start"].reset_index(drop=True)
@@ -420,7 +520,7 @@ def run(raw_input, cfg):
                 for j in idxs[in_window]:
                     burst[j] = max(burst[j], cnt)
     add(burst >= min_count, "conveyor", DEFECT,
-        lambda i: f"конвейер: {int(burst[i])} анкет за {window} мин на одном устройстве (≥ {min_count})")
+        lambda i: f"конвейер: {int(burst[i])} {plural(burst[i], 'анкета', 'анкеты', 'анкет')} за {window} мин на одном устройстве (≥ {min_count})")
 
     # --- Время суток ---------------------------------------------------------
     night = cfg["night"]
@@ -440,10 +540,13 @@ def run(raw_input, cfg):
         if key == "phone":
             norm = df[col].map(normalize_phone)
         else:
-            # Полных тёзок в большом городе много — одно ФИО сравниваем только
-            # внутри одного города.
+            # Полных тёзок в большом городе много. Одно ФИО — дубликат, только
+            # если это тот же город и тот же интервьюер (опросил «знакомого»
+            # дважды). Разные интервьюеры с разными телефонами — это тёзки;
+            # один и тот же телефон ловит проверка телефона.
             names = df[col].map(lambda v: normalize_name(v, answer_filter))
-            norm = (df["city"].fillna("") + "|" + names).where(names.notna())
+            norm = (df["city"].fillna("") + "|" + df["inter"].fillna("—") + "|" + names).where(names.notna())
+        norm = norm.where(iv)
         groups = df[norm.notna()].groupby(norm[norm.notna()])
         dup_of = {}
         for _, g in groups:
@@ -471,7 +574,7 @@ def run(raw_input, cfg):
             limit = wave_median * probing.get("low_avg_pct", 70) / 100
             inter_avg = base.groupby("inter")["probe_total"].mean()
             low = inter_avg[inter_avg < limit]
-            add(df["inter"].isin(list(low.index)), "probe_low_avg", probing.get("low_avg_severity", DEFECT),
+            add(df["inter"].isin(list(low.index)) & iv, "probe_low_avg", probing.get("low_avg_severity", DEFECT),
                 lambda i: f"у интервьюера в среднем {low[df.at[i, 'inter']]:.1f} ответов в открытых вопросах "
                           f"(< {probing.get('low_avg_pct', 70)}% медианы волны {wave_median:.1f})")
 
@@ -502,11 +605,33 @@ def run(raw_input, cfg):
         code = f"rule:{name}"
         ISSUE_LABELS.setdefault(code, f"Правило «{name}»: {describe_rule(rule)}")
         tc = rule["then_col"]
-        add(cond_if & ~cond_then, code, rule.get("severity", DEFECT),
+        add(cond_if & ~cond_then & iv.to_numpy(), code, rule.get("severity", DEFECT),
             lambda i, name=name, tc=tc: f"правило «{name}»: «{tc}» = {clean_str(raw_sorted.at[i, tc]) or 'пусто'}")
 
+    # --- Блоки анкеты: обязательный блок пуст, одинаковые ответы в сетке ----
+    from . import blocks as blk
+    sections = blk.build_sections(raw.columns, cfg)
+    for sec in sections:
+        cols = [c for c in sec["columns"] if c in raw_sorted.columns]
+        if not cols:
+            continue
+        filled = ~raw_sorted[cols].apply(_is_blank)
+        if sec.get("required"):
+            add(df["completed"].to_numpy() & ~filled.any(axis=1).to_numpy(), "block_empty", DEFECT,
+                lambda i, n=sec["name"]: f"блок «{n}» не заполнен, хотя интервью завершено")
+        if sec.get("grid") and len(cols) >= 4:
+            vals = raw_sorted[cols].apply(lambda c: c.map(lambda v: norm_text(v) if clean_str(v) else None))
+            n_filled = filled.sum(axis=1)
+            same = (vals.nunique(axis=1) == 1) & (n_filled >= 4)
+            add(same.to_numpy() & iv.to_numpy(), "grid_same", WARNING,
+                lambda i, n=sec["name"], cols=cols: f"блок «{n}»: во всех {int(n_filled[i])} вопросах один ответ "
+                                                    f"«{next(clean_str(raw_sorted.at[i, c]) for c in cols if clean_str(raw_sorted.at[i, c]))}»")
+
     # --- Итог по анкетам -----------------------------------------------------
+    sec_of = blk.section_of(sections)
     df["issues"] = issues
+    df["blocks"] = [[blk.issue_block(c, x, cfg, sec_of) for c, _, x in xs] for xs in issues]
+    df["primary"] = [primary_issue(xs) for xs in issues]
     df["is_defect"] = df["issues"].map(lambda xs: any(s == DEFECT for _, s, _ in xs))
     df["is_warning"] = df["issues"].map(lambda xs: any(s == WARNING for _, s, _ in xs))
     df["reason_text"] = df["issues"].map(lambda xs: "; ".join(x for _, s, x in xs if s == DEFECT))
@@ -525,6 +650,7 @@ def run(raw_input, cfg):
         "rule_errors": rule_errors,
         "wave_median": wave_median,
         "blocks": [b.get("label") or f"Блок {i + 1}" for i, b in enumerate(blocks)],
+        "sections": [{"name": s["name"], "n": len(s["columns"]), "auto": bool(s.get("auto"))} for s in sections],
         "interviewers": interviewers,
         "repetition": repetition,
         "geo": geo_result,
@@ -643,11 +769,12 @@ def summarize_interviewers(df, cfg, repetition):
     red, yellow = cfg["status"]["red_pct"], cfg["status"]["yellow_pct"]
     rep_by_inter = {r["Интервьюер"]: r for r in repetition.get("rows", [])}
     rows = []
-    for inter, g in df.groupby(df["inter"].fillna("—")):
+    for inter, g_all in df.groupby(df["inter"].fillna("—")):
+        g = g_all[~g_all["technical"]]         # доля брака — среди интервью
         n = len(g)
-        n_def = int(g["is_defect"].sum())
-        pct = round(n_def / n * 100, 1) if n else 0.0
-        codes = Counter(code for xs in g["issues"] for code, sev, _ in xs if sev == DEFECT)
+        n_def = int(g_all["is_defect"].sum())
+        pct = round(n_def / n * 100, 1) if n else (100.0 if n_def else 0.0)
+        codes = Counter(code for xs in g_all["issues"] for code, sev, _ in xs if sev == DEFECT)
         top = ", ".join(f"{ISSUE_LABELS.get(c, c)} ×{k}" for c, k in codes.most_common(3))
         city = g["city"].mode()
         rep = rep_by_inter.get(inter)
@@ -659,8 +786,10 @@ def summarize_interviewers(df, cfg, repetition):
             "Брак": n_def,
             "% брака": pct,
             "Статус": status_for_pct(pct, red, yellow),
-            "Предупреждений": int(g["is_warning"].sum()),
+            "Тех. записей": int(g_all["technical"].sum()),
+            "Предупреждений": int(g_all["is_warning"].sum()),
             "Риск (средний)": int(round(g["risk"].mean())) if n else 0,
+            "Регион": g_all["region"].mode().iloc[0] if "region" in g_all and len(g_all) else "—",
             "Повтор значения": f"{rep['Самое частое значение']} — {rep['% повтора']}%" if rep else "",
             "Повтор: статус": rep["Статус"] if rep else "",
             "Главные причины брака": top,
