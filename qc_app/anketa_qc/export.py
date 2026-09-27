@@ -83,8 +83,9 @@ def defects_table(df, only_defects=True):
     return out.sort_values(["Город", "Интервьюер"], key=lambda s: s.astype(str)).reset_index(drop=True)
 
 
-def full_report(result, legend):
-    """Полный отчёт по волне: брак, все анкеты, интервьюеры, города, повтор."""
+def full_report(result, legend, daily_rows=None):
+    """Полный отчёт по волне: брак, все анкеты, интервьюеры, работа по дням,
+    города, повтор."""
     df = result["df"]
 
     def build(writer):
@@ -93,6 +94,8 @@ def full_report(result, legend):
         inter = pd.DataFrame(result["interviewers"])
         if len(inter):
             write_sheet(writer, "Интервьюеры", inter.drop(columns=["Повтор: статус"]), status_col="Статус")
+        if daily_rows:
+            write_sheet(writer, "По дням", pd.DataFrame(daily_rows))
         leg = pd.DataFrame([{"Статус": x["code"], "Описание": x["desc"], "Действия": x["actions"]} for x in legend])
         write_sheet(writer, "Легенда статусов", leg, status_col="Статус")
         if result["city_issues"]:

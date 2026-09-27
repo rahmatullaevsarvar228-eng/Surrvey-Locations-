@@ -103,8 +103,10 @@ class Session:
             raise ValueError("Сначала запустите проверку")
         r = self.result
         if kind == "full":
+            from . import daily
             return (f"otchet_{slug}_{stamp}.xlsx",
-                    export.full_report(r, engine.status_legend(self.config)))
+                    export.full_report(r, engine.status_legend(self.config),
+                                       daily.frame(r, self.config, self.decisions_by_pos())))
         if kind == "interviewers":
             return f"interviewery_{slug}_{stamp}.xlsx", export.simple_report(
                 "Интервьюеры", r["interviewers"], status_col="Статус")
@@ -225,7 +227,8 @@ def result_payload(sess):
     inter_status = [x["Статус"] for x in r["interviewers"]]
     return {
         "summary": {
-            "total": n, "interviews": n_iv, "technical": n_tech,
+            "total": n, "interviews": n_iv, "technical": n_tech, "source_rows": n + r["n_dropped"],
+            "technical_info": r.get("technical_info"),
             "completed": int(df["completed"].sum()),
             "defects": n_def, "defect_pct": round(n_def / max(n_iv, 1) * 100, 1),
             "warnings": int(df["is_warning"].sum()),

@@ -10,6 +10,20 @@ from . import engine
 
 DECISIONS = ("Брак", "Принять", "На перезвон")
 
+
+def final_state(technical, defect, warning, decision):
+    """Итоговое состояние анкеты — как в дашбордах: решение руководителя
+    важнее системы. tech / brak / warn / ok."""
+    if technical:
+        return "tech"
+    if decision == "Брак":
+        return "brak"
+    if decision == "Принять":
+        return "ok"
+    if decision == "На перезвон":
+        return "warn"
+    return "brak" if defect else "warn" if warning else "ok"
+
 # Для каждой проверки: какие роли колонок она читает и как рассуждает.
 # {…} подставляются из настроек проекта.
 EXPLAIN = {

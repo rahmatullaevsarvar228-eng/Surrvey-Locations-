@@ -251,16 +251,16 @@ function pageOverview(root) {
   const anks = scoped();
   const c = counts(anks);
   root.append(filterBar("overview"));
-  if (s.dropped) root.append(h("div", { class: "notice warn" }, `Пропущено ${fmt(s.dropped)} строк без Device ID/интервьюера или без города.`));
   if (R.rule_errors.length) root.append(h("div", { class: "notice bad" }, h("div", {}, h("b", {}, "Некоторые правила не проверены: "), R.rule_errors.join("; "))));
   root.append(headline(anks));
+  root.append(reconciliation());
 
   const rv = s.review, q = R.quotas || {};
   const todo = anks.filter((a) => (a.defect || a.warning) && !a.decision && !a.technical).length;
   root.append(h("div", { class: "stats" },
     tile("Анкет", fmt(c.iv), c.tech ? `+ ${fmt(c.tech)} тех. записей (видео/фото)` : s.period || ""),
     tile("Брак", fmt(c.brak), `${fmt(pct(c.brak, c.iv), 1)}% анкет`, "red", () => go("defects")),
-    tile("Проверить", fmt(c.warn), "сигналы, не брак сами по себе", "yellow", () => { S.reviewFilter = "todo"; go("review"); }),
+    tile("Проверить", fmt(c.warn), "сигналы, не брак сами по себе", "yellow", () => { S.reviewFilter = "warn"; go("review"); }),
     tile("Норма", fmt(c.ok), `${fmt(pct(c.ok, c.iv), 1)}% анкет`, "green"),
     rv.enabled ? tile("Ждут решения", fmt(todo), "руководителя проекта", "", () => { S.reviewFilter = "todo"; go("review"); }) : null,
     q.enabled ? tile("План выполнен", `${fmt(q.summary.pct)}%`, `план ${fmt(q.summary.plan)} · добрать ${fmt(q.summary.left)}${q.summary.over ? ` · перебор ${fmt(q.summary.over)}` : ""}`, "", () => go("quotas")) : null));
@@ -269,10 +269,15 @@ function pageOverview(root) {
     card("Анкеты по дням", "Нажмите на день — все графики покажут только его.",
       legend([["c-brak", "Брак"], ["c-warn", "Проверить"], ["c-ok", "Норма"]]),
       dayColumns(scoped().filter((a) => matches(a, "date")), (d) => setFilter("date", F().date === d ? null : d, "overview"))),
-    card("Главные причины брака", "Сколько анкет с каждой причиной. У анкеты может быть несколько причин.",
+    lastDayCard()));
+
+  root.append(h("div", { class: "grid-2" },
+    card("Главные причины брака", "Сколько анкет с каждой причиной. У анкеты может быть несколько причин. Нажмите — подробности.",
       hbars(reasonCounts(anks.filter(isBrak), "defect").map(([code, n]) => ({ label: label(code), value: n, code,
         tip: () => [tipVal(fmt(n), "анкет с браком"), h("div", { class: "muted" }, `${fmt(pct(n, c.brak), 0)}% всего брака`)] })),
-      { color: "c-brak", limit: 7, onClick: (it) => { S.defReason = it.code; go("defects"); }, empty: "Брака нет" }))));
+      { color: "c-brak", limit: 7, onClick: (it) => { S.defReason = it.code; go("defects"); }, empty: "Брака нет" })),
+    card("Интервьюеры в зоне риска", "С наибольшей долей брака. Нажмите — откроется карточка интервьюера.",
+      riskList(anks))));
 
   const cities = [...groupBy(anks.filter((a) => !a.technical), "city")].map(([city, v]) => {
     const cc = counts(v);
@@ -281,13 +286,6 @@ function pageOverview(root) {
   root.append(h("div", { class: "grid-2" },
     card("Брак по городам", "Доля брака среди анкет города. Нажмите на город, чтобы отфильтровать.",
       cityBars(cities)),
-    card("Интервьюеры в зоне риска", "С наибольшей долей брака. Нажмите — откроется карточка интервьюера.",
-      riskList(anks))));
-
-  const blocks = blockCounts(anks.filter(isBrak), "defect");
-  root.append(h("div", { class: "grid-2" },
-    card("В каких блоках анкеты ошибки", "Блок — часть анкеты или служебная область (время, GPS, устройство).",
-      hbars(blocks.map(([b, n]) => ({ label: b, value: n })), { limit: 8, empty: "Брака нет" })),
     card("Отчёты и история", "Отчёт Word строится по выбранным фильтрам. Волна сохраняет итоги по интервьюерам на этом компьютере — видно, кто несколько волн подряд в красной или жёлтой зоне.",
       h("div", { class: "row", style: "flex-wrap:wrap;margin-bottom:14px" },
         h("button", { class: "btn primary", onclick: () => exportReport("word") }, "Отчёт Word"),
@@ -296,6 +294,27 @@ function pageOverview(root) {
         h("button", { class: "btn", onclick: () => exportReport("full") }, "Полный Excel")),
       saveWave())));
 }
+// Последний день: кто работал, кто выполнил норму, кто нет.
+function lastDayCard() {
+  const { norm, days, rows } = dailyData(S.result.anketas.filter((a) => matches(a, "date")));
+  if (!days.length) return card("Последний день", null, h("div", { class: "empty small" }, "Нет дат"));
+  const day = F().date && days.includes(F().date) ? F().date : days[days.length - 1];
+  const k = days.indexOf(day);
+  const cs = rows.map((r) => r.cells[k]);
+  const worked = cs.filter((c) => c.n).length, off = rows.length - worked;
+  const low = cs.filter((c) => c.st === "low").length, good = cs.filter((c) => c.st === "good").length;
+  return card(`День ${dayLabel(day)}`, "Кто работал и выполнил ли дневную норму. Подробно — во вкладке «По дням».",
+    h("div", { class: "day-sum" },
+      h("div", {}, h("div", { class: "ds-v" }, `${worked}/${rows.length}`), h("div", { class: "muted small" }, "работали")),
+      norm ? h("div", {}, h("div", { class: "ds-v t-okx" }, good), h("div", { class: "muted small" }, `выполнили норму (${norm})`)) : null,
+      norm ? h("div", {}, h("div", { class: "ds-v t-warnx" }, low), h("div", { class: "muted small" }, "ниже нормы")) : null,
+      h("div", {}, h("div", { class: `ds-v ${off ? "t-brak" : ""}` }, off), h("div", { class: "muted small" }, "не работали"))),
+    stackBar([{ value: good || (norm ? 0 : worked), color: "c-ok", label: norm ? "выполнили норму" : "работали" },
+      { value: low, color: "c-warn", label: "ниже нормы" }, { value: off, color: "c-brak", label: "не работали" }], rows.length),
+    h("div", { class: "row", style: "margin-top:14px" }, h("button", { class: "btn", onclick: () => go("daily") }, "Открыть «По дням» →"),
+      norm ? null : h("span", { class: "muted small" }, "Норма в день не задана")));
+}
+
 function cityBars(cities) {
   return hbars(cities.map((x) => ({ ...x, tip: () => [h("div", { class: "tip-h" }, x.label),
     tipVal(fmt(x.cc.brak), "брак", "c-brak"), tipVal(fmt(x.cc.warn), "проверить", "c-warn"), tipVal(fmt(x.cc.ok), "норма", "c-ok")] })),
@@ -476,31 +495,6 @@ function showInterviewer(inter) {
     all.some((a) => a.lat != null) ? card("Маршрут", "Анкеты по времени; линия — порядок в течение дня.", miniMap(all, null, true)) : null,
     card("Анкеты", null, passportTable(all.filter((a) => a.defect || a.warning || a.decision), "defect")));
   openModal(`Интервьюер ${inter}`, body, true);
-}
-
-// ── Все анкеты ──────────────────────────────────────────────────────────────
-function pageAnketas(root) {
-  if (!S.result) return noResult(root);
-  root.append(filterBar("anketas"));
-  const all = scoped();
-  const filters = { brak: ["Брак", (a) => stateOf(a) === "brak"], warn: ["Проверить", (a) => stateOf(a) === "warn"],
-    ok: ["Норма", (a) => stateOf(a) === "ok"], tech: ["Тех. записи", (a) => a.technical], all: ["Все", () => true] };
-  if (!filters[S.anketaFilter]) S.anketaFilter = "brak";
-  const seg = h("div", { class: "segmented" }, Object.entries(filters).map(([k, [lbl, fn]]) =>
-    h("button", { class: S.anketaFilter === k ? "on" : "", onclick: () => { S.anketaFilter = k; go("anketas"); } }, `${lbl} · ${fmt(all.filter(fn).length)}`)));
-  const rows = all.filter(filters[S.anketaFilter][1]).map((a) => ({ ...a, st: stateOf(a),
-    why: (a.issues.find((i) => i[0] === a.primary) || [])[3] || "", block: [...new Set(a.issues.map((i) => i[2]))].join(", ") }));
-  root.append(h("div", { class: "card" },
-    table([
-      { key: "st", label: "", render: (r) => h("span", { class: `st ${ST[r.st].cls}`, title: ST[r.st].label }, ST[r.st].icon) },
-      { key: "id", label: "ID" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
-      { key: "start", label: "Старт", sortVal: (r) => r.start && r.start.split(/[. :]/).reverse().join("") },
-      { key: "duration", label: "Мин", num: true, digits: 1 },
-      { key: "risk", label: "Риск", num: true, render: (r) => riskTag(r.risk) },
-      { key: "why", label: "Главная причина", wrap: true }, { key: "block", label: "Блок", wrap: true },
-      { key: "decision", label: "Решение", render: (r) => decisionTag(r.decision) },
-    ], rows, { tools: seg, height: 640, onClick: (r) => openAnketa(r.pos),
-      rowClass: (r) => (r.st === "brak" ? "row-RED" : r.st === "warn" ? "row-YELLOW" : "") })));
 }
 
 // ── Карта GPS ───────────────────────────────────────────────────────────────
@@ -702,4 +696,136 @@ function drawHeat(layer, pts) {
     L.rectangle([[i * cell, j * cell], [(i + 1) * cell, (j + 1) * cell]], { stroke: false, fillColor: ramp[Math.min(5, Math.floor(v / max * 5.999))], fillOpacity: 0.55 })
       .bindTooltip(`${v} анкет в квадрате ~400 м`).addTo(layer);
   }
+}
+
+// ── По дням: норма и кто не работал ─────────────────────────────────────────
+function dailyData(anks) {
+  const d = cfg().daily || (cfg().daily = { min: 0, team: [] });
+  const norm = Number(d.min) || 0;
+  const iv = anks.filter((a) => !a.technical && a.date);
+  const days = [...new Set(iv.map((a) => a.date))].sort();
+  const f = F();
+  const team = (d.team || []).map((x) => String(x).trim()).filter(Boolean);
+  const inters = [...new Set([...iv.map((a) => a.inter), ...(!f.city && !f.region && !f.inter ? team : [])])]
+    .filter(Boolean).sort((x, y) => String(x).localeCompare(String(y), "ru", { numeric: true }));
+  const by = new Map();
+  for (const a of iv) {
+    const k = `${a.inter}|${a.date}`;
+    const x = by.get(k) || { n: 0, brak: 0, list: [] };
+    x.n++; if (isBrak(a)) x.brak++; x.list.push(a);
+    by.set(k, x);
+  }
+  const rows = inters.map((inter) => {
+    const cells = days.map((day) => {
+      const x = by.get(`${inter}|${day}`) || { n: 0, brak: 0, list: [] };
+      const ok = x.n - x.brak;
+      return { ...x, ok, day, st: x.n === 0 ? "off" : norm && ok < norm ? "low" : "good" };
+    });
+    const worked = cells.filter((c) => c.n).length;
+    const ok = cells.reduce((s, c) => s + c.ok, 0);
+    const city = (iv.find((a) => a.inter === inter) || {}).city || "—";
+    return { inter, city, cells, worked, off: days.length - worked, low: cells.filter((c) => c.st === "low").length,
+      ok, brak: cells.reduce((s, c) => s + c.brak, 0), avg: worked ? ok / worked : 0 };
+  });
+  return { norm, days, rows };
+}
+
+function pageDaily(root) {
+  if (!S.result) return noResult(root);
+  root.append(filterBar("daily"));
+  const d = cfg().daily || (cfg().daily = { min: 0, team: [] });
+  const data = dailyData(S.result.anketas.filter((a) => matches(a, "date")));
+  const { norm, days, rows } = data;
+  if (!days.length) return root.append(h("div", { class: "card" }, h("div", { class: "empty" }, "В анкетах нет дат.")));
+  const day = F().date && days.includes(F().date) ? F().date : days[days.length - 1];
+  const k = days.indexOf(day);
+  const lead = document.body.classList.contains("is-lead");
+
+  // норма — прямо здесь, одним полем
+  const normInput = h("input", { type: "number", min: 0, max: 100, value: norm || "", placeholder: "—", class: "norm-input", disabled: !lead,
+    onchange: (e) => {
+      const v = Math.max(0, Math.round(Number(e.target.value) || 0));
+      if (v === (Number(d.min) || 0)) return;
+      d.min = v; saveConfigSoon(); setTimeout(() => go("daily"));   // перерисовка — после события, не внутри него
+    } });
+  root.append(h("div", { class: "norm-bar" },
+    h("div", {}, h("b", {}, "Норма в день: "), normInput, h("span", {}, " засчитанных анкет на интервьюера")),
+    h("div", { class: "muted small" }, norm ? "Засчитанная — без брака (с учётом решений руководителя). Технические записи не считаются."
+      : "Норма не задана — впишите число (например 5, 6 или 7), и программа покажет, кто её не выполнил.")));
+
+  // выбранный день
+  const cs = rows.map((r) => ({ r, c: r.cells[k] }));
+  const worked = cs.filter((x) => x.c.n);
+  const off = cs.filter((x) => !x.c.n);
+  const low = cs.filter((x) => x.c.st === "low");
+  const good = cs.filter((x) => x.c.st === "good");
+  root.append(h("div", { class: "day-pick" }, h("span", { class: "muted small" }, "День:"),
+    days.map((x) => h("button", { class: `day-chip ${x === day ? "on" : ""}`, onclick: () => setFilter("date", x, "daily") }, dayLabel(x)))));
+  root.append(h("div", { class: "stats" },
+    tile(`Работали ${dayLabel(day)}`, `${fmt(worked.length)} из ${fmt(rows.length)}`, "интервьюеров прислали анкеты"),
+    norm ? tile("Выполнили норму", fmt(good.length), `${norm}+ засчитанных анкет`, "green") : null,
+    norm ? tile("Ниже нормы", fmt(low.length), `меньше ${norm} засчитанных`, "yellow") : null,
+    tile("Не работали", fmt(off.length), "ни одной анкеты за день", off.length ? "red" : ""),
+    tile("Засчитано", fmt(cs.reduce((s, x) => s + x.c.ok, 0)), `брак: ${fmt(cs.reduce((s, x) => s + x.c.brak, 0))}`)));
+  const names = (list, extra) => list.length ? list.map((x) => h("span", { class: "name-chip", onclick: () => showInterviewer(x.r.inter) }, x.r.inter, extra ? h("b", {}, extra(x)) : null))
+    : [h("span", { class: "muted" }, "нет")];
+  root.append(h("div", { class: "grid-2" },
+    card(`Не работали ${dayLabel(day)}`, "Интервьюеры проекта, от которых за этот день не пришло ни одной анкеты.", h("div", { class: "names" }, names(off))),
+    card(`Ниже нормы ${dayLabel(day)}`, norm ? `Засчитано меньше ${norm} анкет. В скобках — засчитано / брак.` : "Задайте норму выше.",
+      h("div", { class: "names" }, norm ? names(low, (x) => ` ${x.c.ok}${x.c.brak ? ` / ✕${x.c.brak}` : ""}`) : [h("span", { class: "muted" }, "—")]))));
+
+  // матрица: интервьюер × день
+  const head = h("tr", {}, h("th", { class: "sticky" }, "Интервьюер"), h("th", {}, "Город"),
+    days.map((x) => h("th", { class: `num dcol ${x === day ? "on" : ""}`, onclick: () => setFilter("date", x, "daily"), title: "Выбрать день" }, dayLabel(x))),
+    h("th", { class: "num" }, "Дней"), h("th", { class: "num" }, "Не работал"), norm ? h("th", { class: "num" }, "Ниже нормы") : null,
+    h("th", { class: "num" }, "Засчитано"), h("th", { class: "num" }, "Брак"), h("th", { class: "num" }, "В день"));
+  const body = h("tbody", {}, rows.map((r) => h("tr", {},
+    h("td", { class: "sticky" }, h("a", { href: "#", onclick: (e) => { e.preventDefault(); showInterviewer(r.inter); } }, r.inter)),
+    h("td", { class: "muted" }, r.city),
+    r.cells.map((c) => {
+      const cell = h("td", { class: `num dcell ${c.st} ${c.day === day ? "on" : ""}`, onclick: c.n ? () => showList(`${r.inter} · ${dayLabel(c.day)}`, c.list) : null },
+        c.n ? String(c.ok) : "—", c.brak ? h("sup", {}, `✕${c.brak}`) : null);
+      hoverable(cell, () => [h("div", { class: "tip-h" }, `${r.inter} · ${dayLabel(c.day)}`),
+        c.n ? tipVal(fmt(c.ok), "засчитано") : h("div", {}, "не работал"), c.brak ? tipVal(fmt(c.brak), "брак", "c-brak") : null,
+        norm && c.n ? h("div", { class: "muted" }, c.ok >= norm ? "норма выполнена" : `до нормы не хватает ${norm - c.ok}`) : null]);
+      return cell;
+    }),
+    h("td", { class: "num" }, r.worked), h("td", { class: `num ${r.off ? "t-bad" : ""}` }, r.off || "—"),
+    norm ? h("td", { class: `num ${r.low ? "t-warn" : ""}` }, r.low || "—") : null,
+    h("td", { class: "num" }, fmt(r.ok)), h("td", { class: "num" }, r.brak || "—"), h("td", { class: "num" }, fmt(r.avg, 1)))));
+  root.append(h("div", { class: "card" },
+    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Интервьюеры по дням"),
+      h("p", { class: "hint" }, "В клетке — засчитанные анкеты за день, маленькая цифра ✕ — брак. Зелёная — норма выполнена, жёлтая — ниже нормы, красная — не работал. Нажмите на клетку — анкеты за этот день."))),
+    legend([["dl-good", "норма выполнена"], ["dl-low", "ниже нормы"], ["dl-off", "не работал"]]),
+    h("div", { class: "table-wrap daily-wrap" }, h("table", { class: "daily" }, h("thead", {}, head), body))));
+
+  // команда: чтобы видеть и тех, кто ни разу ничего не прислал
+  if (lead) {
+    const ta = h("textarea", { rows: 3, placeholder: "Inter 01, Inter 02, Inter 03…", value: (d.team || []).join(", ") });
+    root.append(h("details", { class: "card fold" }, h("summary", {}, "Список команды (необязательно)"),
+      h("p", { class: "hint" }, "Коды интервьюеров через запятую. Нужно, чтобы видеть и тех, кто за весь период не прислал ни одной анкеты — иначе программа знает только тех, кто что-то прислал."),
+      ta, h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn", onclick: () => {
+        d.team = ta.value.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean); saveConfigSoon(); go("daily");
+      } }, "Сохранить список"))));
+  }
+}
+
+// ── Сверка: как получились цифры ───────────────────────────────────────────
+function reconciliation() {
+  const s = S.result.summary;
+  const c = counts(S.result.anketas);
+  const ti = s.technical_info;
+  const parts = [
+    ["строк в таблице", s.source_rows],
+    s.dropped ? ["пропущено (нет города или интервьюера)", -s.dropped] : null,
+    c.tech ? ["технические записи (видео/фото)", -c.tech] : null,
+  ].filter(Boolean);
+  const ok = c.brak + c.warn + c.ok === c.iv && s.source_rows - s.dropped - c.tech === c.iv;
+  return h("div", { class: `recon ${ok ? "" : "bad"}` },
+    h("b", {}, ok ? "✓ Сверка: " : "⚠ Сверка не сходится: "),
+    parts.map(([t, n], i) => h("span", {}, i ? (n < 0 ? " − " : " + ") : "", h("b", {}, fmt(Math.abs(n))), ` ${t}`)),
+    " = ", h("b", {}, fmt(c.iv)), " анкет = ",
+    h("span", { class: "t-brak" }, fmt(c.brak)), " брак + ", h("span", { class: "t-warnx" }, fmt(c.warn)), " проверить + ",
+    h("span", { class: "t-okx" }, fmt(c.ok)), " норма.",
+    ti ? h("span", { class: "muted" }, ` Технические записи ${ti.auto ? "найдены автоматически" : "заданы"} по колонке «${ti.col}».`) : null);
 }

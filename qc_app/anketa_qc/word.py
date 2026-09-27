@@ -29,6 +29,7 @@ from docx.oxml.ns import qn  # noqa: E402
 from docx.shared import Cm, Pt, RGBColor  # noqa: E402
 
 from . import engine, review  # noqa: E402
+from .review import final_state  # noqa: E402,F401
 
 NAVY = RGBColor(0x1F, 0x4E, 0x78)
 GREY = RGBColor(0x6E, 0x6E, 0x73)
@@ -46,18 +47,6 @@ plt.rcParams.update({
 # ─────────────────────────────────────────────────────────────────────────
 # Данные
 # ─────────────────────────────────────────────────────────────────────────
-def final_state(technical, defect, warning, decision):
-    if technical:
-        return "tech"
-    if decision == "Брак":
-        return "brak"
-    if decision == "Принять":
-        return "ok"
-    if decision == "На перезвон":
-        return "warn"
-    return "brak" if defect else "warn" if warning else "ok"
-
-
 def frame(result, decisions_by_pos, filters=None):
     """Таблица анкет для отчёта с итоговым состоянием и фильтрами."""
     df = result["df"].copy()
@@ -436,11 +425,32 @@ def build(result, cfg, decisions_by_pos, project, source, quotas_result=None, us
         if names:
             bullet(doc, f" {', '.join(map(str, names))}. Что делать: {lv['actions']}.", f"{STATUS_TEXT[code]}:")
 
-    # ── 6. Квоты ──────────────────────────────────────────────────────────
-    q = quotas_result or {}
+    # ── 6. По дням ────────────────────────────────────────────────────────
+    from . import daily
+    d_rows, d_days, d_per_day, norm = daily.table(result, cfg, decisions_by_pos, filters)
     n_sec = 6
+    if d_days:
+        heading(doc, f"{n_sec}. Работа по дням")
+        para(doc, (f"Норма — {norm} засчитанных анкет в день (брак в норму не идёт)." if norm else
+                   "Дневная норма не задана — показано, сколько засчитанных анкет (без брака) сделано в каждый день."),
+             10, GREY)
+        add_table(doc, ["День", "Работали", "Выполнили норму", "Ниже нормы", "Не работали", "Засчитано", "Брак"],
+                  [[pd.Timestamp(x["day"]).strftime("%d.%m.%Y"), f"{x['worked']} из {x['team']}",
+                    x["norm_ok"] if norm else "—", x["low"] if norm else "—", x["off"], x["ok"], x["brak"]]
+                   for x in d_per_day], align_right=(2, 3, 4, 5, 6), font_size=9)
+        weak = [r for r in d_rows if r["days_low"] or r["days_off"]]
+        if weak:
+            para(doc, "Кто не выполнял норму или пропускал дни", 11, NAVY, bold=True, space_after=2)
+            add_table(doc, ["Интервьюер", "Город", "Работал дней", "Не работал", "Ниже нормы", "В среднем в день"],
+                      [[r["inter"], r["city"], r["days_worked"], r["days_off"], r["days_low"] if norm else "—", r["avg"]]
+                       for r in sorted(weak, key=lambda r: (-r["days_off"] - r["days_low"], str(r["inter"])))],
+                      align_right=(2, 3, 4, 5), font_size=9)
+        n_sec += 1
+
+    # ── Квоты ─────────────────────────────────────────────────────────────
+    q = quotas_result or {}
     if q.get("enabled"):
-        heading(doc, "6. Выполнение квот")
+        heading(doc, f"{n_sec}. Выполнение квот")
         sm = q["summary"]
         in_plan = sm.get("ok_in_plan", sm["ok"])
         para(doc, f"План выполнен на {sm['pct']}%: в пределах плана засчитано {in_plan} из {sm['plan']}, "
@@ -452,7 +462,7 @@ def build(result, cfg, decisions_by_pos, project, source, quotas_result=None, us
                                                      f"{r['%']}%" if r.get("%") is not None else "—"]
                    for r in q["rows"] if not (filters or {}).get("city") or r.get("Город") == filters["city"]],
                   align_right=tuple(range(len(labels), len(labels) + 5)), font_size=8.5)
-        n_sec = 7
+        n_sec += 1
 
     # ── Выводы ────────────────────────────────────────────────────────────
     heading(doc, f"{n_sec}. Выводы и рекомендации")

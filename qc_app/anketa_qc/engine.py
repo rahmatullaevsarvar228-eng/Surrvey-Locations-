@@ -221,8 +221,9 @@ def prepare(raw, cfg):
     else:
         df["lat"] = df["lon"] = np.nan
 
-    from .blocks import technical_mask
-    df["technical"] = technical_mask(raw, cfg)
+    from .blocks import resolve_technical
+    df["technical"], tech_info = resolve_technical(raw, cfg)
+    df.attrs["technical_info"] = tech_info
     done_cols = [c for c in cfg.get("completed_cols") or [] if c in raw.columns]
     if done_cols:
         df["completed"] = (~raw[done_cols].apply(_is_blank)).any(axis=1)
@@ -463,27 +464,37 @@ def run(raw_input, cfg):
     add((dur < t["min_duration_min"]) & dur.notna() & df["completed"], "too_short", DEFECT,
         lambda i: f"интервью длилось {dur[i]:.1f} мин (< {t['min_duration_min']})")
 
-    # --- Интервал между стартами и «отдых» ----------------------------------
-    # Только среди интервью: техническая запись между двумя интервью не
-    # должна делать следующее интервью «слишком быстрым».
+    # --- Интервал между анкетами и «отдых» ----------------------------------
+    # Сравниваем с записью, которая была на устройстве прямо перед этой.
+    # Перед анкетой было интервью и перерыв меньше порога — брак: за такое
+    # время не найти и не опросить нового респондента. Перед анкетой было
+    # техническое задание (видео, фото) — не брак: интервьюер не опрашивал,
+    # а снимал задание рядом и сразу начал интервью.
     ivs = df[iv]
-    by_dev = ivs.groupby("deviceid")
-    df["gap_min"] = (by_dev["start"].diff().dt.total_seconds() / 60).reindex(df.index)
-    add((df["gap_min"] < t["min_interval_min"]) & df["gap_min"].notna(), "start_gap", DEFECT,
-        lambda i: f"интервал с предыдущей анкетой {df.at[i, 'gap_min']:.1f} мин (< {t['min_interval_min']})")
+    by_dev = df.groupby("deviceid")
+    prev_start, prev_end = by_dev["start"].shift(1), by_dev["end"].shift(1)
+    prev_id = by_dev["row_id"].shift(1)
+    prev_tech = by_dev["technical"].shift(1).fillna(False).astype(bool)
+    after_interview = iv & prev_start.notna() & ~prev_tech
+    df["prev_tech"] = prev_tech & iv
+    df["gap_min"] = ((df["start"] - prev_start).dt.total_seconds() / 60).where(after_interview)
+    df["rest_min"] = ((df["start"] - prev_end).dt.total_seconds() / 60).where(after_interview)
+    thr = t["min_interval_min"]
+    prev_txt = lambda i: (f"предыдущее интервью {prev_id[i]}: {prev_start[i]:%H:%M:%S}–"  # noqa: E731
+                          f"{prev_end[i]:%H:%M:%S}" if pd.notna(prev_end[i]) else f"предыдущее интервью {prev_id[i]}")
+    add((df["gap_min"] < thr) & df["gap_min"].notna(), "start_gap", DEFECT,
+        lambda i: f"начата через {df.at[i, 'gap_min']:.1f} мин после старта предыдущего интервью "
+                  f"(< {thr}); {prev_txt(i)}")
     # Не то же самое, что интервал между стартами: после длинной анкеты старты
     # могут быть далеко друг от друга, а реального перерыва не было.
-    prev_end = by_dev["end"].shift(1).reindex(df.index)
-    prev_id = by_dev["row_id"].shift(1).reindex(df.index)
-    df["rest_min"] = (df["start"] - prev_end).dt.total_seconds() / 60
-    add((df["rest_min"] >= 0) & (df["rest_min"] < t["min_interval_min"]), "no_rest", DEFECT,
-        lambda i: f"начал следующую анкету через {df.at[i, 'rest_min']:.1f} мин после завершения "
-                  f"предыдущей (< {t['min_interval_min']})")
-    # Анкета открыта раньше, чем закончена предыдущая на том же устройстве —
-    # несколько анкет заполнялись параллельно.
+    add((df["rest_min"] >= 0) & (df["rest_min"] < thr), "no_rest", DEFECT,
+        lambda i: f"начал в {df.at[i, 'start']:%H:%M:%S} — через {df.at[i, 'rest_min']:.1f} мин после окончания "
+                  f"предыдущего интервью (< {thr}); {prev_txt(i)}")
+    # Анкета открыта раньше, чем закончено предыдущее интервью на том же
+    # устройстве — несколько анкет заполнялись параллельно.
     add(df["rest_min"] < 0, "overlap", DEFECT,
-        lambda i: f"открыта в {df.at[i, 'start']:%H:%M}, а предыдущая анкета {prev_id[i]} на этом устройстве "
-                  f"закончена только в {prev_end[i]:%H:%M} — наложение {-df.at[i, 'rest_min']:.0f} мин")
+        lambda i: f"открыта в {df.at[i, 'start']:%H:%M}, а предыдущее интервью {prev_id[i]} на этом устройстве "
+                  f"закончено только в {prev_end[i]:%H:%M} — наложение {-df.at[i, 'rest_min']:.0f} мин")
 
     # --- Массовое открытие: несколько анкет открыты почти одновременно ------
     open_sec, open_n = float(t.get("mass_open_sec", 120)), int(t.get("mass_open_count", 3))
@@ -651,6 +662,7 @@ def run(raw_input, cfg):
         "wave_median": wave_median,
         "blocks": [b.get("label") or f"Блок {i + 1}" for i, b in enumerate(blocks)],
         "sections": [{"name": s["name"], "n": len(s["columns"]), "auto": bool(s.get("auto"))} for s in sections],
+        "technical_info": tech_info_of(df),
         "interviewers": interviewers,
         "repetition": repetition,
         "geo": geo_result,
@@ -658,6 +670,10 @@ def run(raw_input, cfg):
         # (урок из main.py: копия на каждой строке роняла приложение по памяти).
         "answers": answers,
     }
+
+
+def tech_info_of(df):
+    return df.attrs.get("technical_info")
 
 
 def check_cities(df, cfg):

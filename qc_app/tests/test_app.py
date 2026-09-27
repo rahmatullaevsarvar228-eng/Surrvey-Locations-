@@ -452,3 +452,16 @@ def test_word_report_dashboard_payload_and_technical(tmp_path, demo_bytes):
     one = Document(io.BytesIO(client.get("/api/export/word?city=Самарканд").data))
     table = next(t for t in one.tables if t.rows[0].cells[0].text == "Город" and t.rows[0].cells[1].text == "Регион")
     assert [row.cells[0].text for row in table.rows[1:]] == ["Самарканд"]
+
+
+def test_web_scripts_parse():
+    """Синтаксическая ошибка в app.js/dash.js — белый экран у пользователя."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("нет Node.js")
+    web = Path(__file__).resolve().parents[1] / "anketa_qc" / "web"
+    for name in ("app.js", "dash.js"):
+        r = subprocess.run([node, "--check", str(web / name)], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr

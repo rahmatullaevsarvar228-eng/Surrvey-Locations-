@@ -224,21 +224,23 @@ const SETUP_STEPS = [
   ["gps", "GPS", "Точки опроса, радиусы, город", pageGps],
   ["quotaSetup", "Квоты", "План выборки", pageQuotaSetup],
 ];
+// hint — одна строка простыми словами: что на этой странице и зачем.
 const PAGES = {
-  data: { title: "Подключение данных", render: pageData },
-  overview: { title: "Главная", render: pageOverview },
-  defects: { title: "Брак: где и почему", render: pageDefects },
-  map: { title: "Карта GPS", render: pageMap },
-  interviewers: { title: "Интервьюеры", render: pageInterviewers },
-  quotas: { title: "Выполнение квот", render: pageQuotas },
-  review: { title: "Проверка анкет", render: pageReview },
-  anketas: { title: "Все анкеты", render: pageAnketas },
+  data: { title: "Источники данных", hint: "Google-таблицы, куда поступают анкеты. Подключите таблицу один раз — дальше программа сама забирает и проверяет новые анкеты.", render: pageData },
+  overview: { title: "Сводка", hint: "Главное по проекту на одном экране: сколько анкет, сколько брака, где проблемы и кто работает хуже всех.", render: pageOverview },
+  daily: { title: "По дням", hint: "Кто сколько анкет сделал в каждый день, выполнил ли норму и кто не работал. Брак в норму не засчитывается.", render: pageDaily },
+  defects: { title: "Брак: где и почему", hint: "Почему анкеты забракованы, в каком блоке анкеты ошибка, в каком городе и у кого.", render: pageDefects },
+  map: { title: "Карта GPS", hint: "Где на самом деле проводились интервью: по плановым точкам, в своём ли городе, сколько анкет в каждой точке.", render: pageMap },
+  interviewers: { title: "Интервьюеры", hint: "Каждый интервьюер: сколько сделал, сколько брака и что с ним делать. Нажмите на строку — карточка интервьюера.", render: pageInterviewers },
+  quotas: { title: "Выполнение квот", hint: "Сколько анкет засчитано по плану и сколько осталось добрать. Брак в план не идёт.", render: pageQuotas },
+  review: { title: "Анкеты", hint: "Все анкеты с причинами. Руководитель проекта ставит решение: брак, принять или на перезвон.", render: pageReview },
   answers: { title: "Ответы в открытых вопросах", render: pageAnswers },
   repetition: { title: "Повтор значения у интервьюера", render: pageRepetition },
   history: { title: "История интервьюеров по волнам", render: pageHistory },
   admin: { title: "Администрирование", render: pageAdmin },
 };
-for (const [key, , , render] of SETUP_STEPS) PAGES[key] = { title: "Настройка проверки", render: (root) => renderSetup(root, key, render), setup: true };
+PAGES.anketas = PAGES.review;
+for (const [key, , , render] of SETUP_STEPS) PAGES[key] = { title: "Настройка проверки", hint: "Делается один раз на проект. Почти всё программа определяет сама — проверьте и поправьте, если нужно.", render: (root) => renderSetup(root, key, render), setup: true };
 function openSetup(step) { go(step || S.setupStep || "columns"); }
 
 function renderSetup(root, key, render) {
@@ -255,7 +257,7 @@ function renderSetup(root, key, render) {
     idx > 0 ? h("button", { class: "btn", onclick: () => go(SETUP_STEPS[idx - 1][0]) }, `← ${SETUP_STEPS[idx - 1][1]}`) : null,
     h("span", { class: "spacer" }),
     next ? h("button", { class: "btn primary", onclick: () => go(next[0]) }, `Дальше: ${next[1]} →`)
-      : h("button", { class: "btn primary", onclick: runChecks }, "Готово — проверить анкеты")));
+      : h("button", { class: "btn primary", onclick: () => runChecks() }, "Готово — проверить анкеты")));
   return r;
 }
 
@@ -265,12 +267,10 @@ function go(page) {
   const navKey = PAGES[page].setup ? "setup" : page;
   document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === navKey));
   untip();
-  $("#pageTitle").textContent = PAGES[page].title;
-  const r = S.result && S.result.summary;
-  $("#pageSub").textContent = r ? [r.source, r.sheet && `лист «${r.sheet}»`, r.period, `проверено ${r.processed_at}`].filter(Boolean).join("  ·  ")
-    : (S.state.source ? `${S.state.source} · лист «${cfg().sheet}»` : "");
+  $("#morePop").hidden = true;
   const content = $("#content");
-  const page_ = h("div", { class: "page" });
+  const page_ = h("div", { class: "page" },
+    h("div", { class: "page-head" }, h("h1", {}, PAGES[page].title), PAGES[page].hint ? h("p", {}, PAGES[page].hint) : null));
   content.replaceChildren(page_);
   content.scrollTop = 0;
   Promise.resolve(PAGES[page].render(page_)).catch((e) => toast(e.message, true));
@@ -280,6 +280,7 @@ function renderSidebar() {
   const sel = $("#projectSelect");
   sel.replaceChildren(...S.state.projects.map((p) => h("option", { value: p, selected: p === S.state.project }, p)));
   document.querySelectorAll("#nav a.needs-result").forEach((a) => a.classList.toggle("disabled", !S.result));
+  document.querySelectorAll(".needs-result-btn").forEach((b) => { b.disabled = !S.result; });
   $("#exportBtn").disabled = !S.result;
   $("#wordBtn").disabled = !S.result;
   const rv = S.result && S.result.summary.review;
@@ -287,12 +288,13 @@ function renderSidebar() {
   $("#sideFoot").textContent = `Версия ${S.state.app.version}`;
   const u = S.state.user || {};
   document.body.classList.toggle("is-admin", u.role === "admin");
+  document.body.classList.toggle("is-lead", u.role === "admin" || u.role === "lead");
   $("#userBox").replaceChildren(
     h("div", { class: "who" }, u.name || u.login || ""),
-    h("div", { class: "team" }, [ROLE_LABEL[u.role] || "", u.role !== "admin" && u.team ? ` · ${u.team}` : ""].join("")),
-    h("div", { class: "row" },
-      h("button", { class: "btn small", onclick: changePassword }, "Пароль"),
-      h("button", { class: "btn small", onclick: logout }, "Выйти")));
+    h("div", { class: "team" }, [ROLE_LABEL[u.role] || "", u.role !== "admin" && u.team ? ` · ${u.team}` : ""].join("")));
+  const s = S.result && S.result.summary;
+  $("#liveBox").replaceChildren(...(s ? [h("i", { class: autoActive() ? "on" : "" }), `проверено ${S.lastRefresh || s.processed_at.slice(-5)}`] : []));
+  $("#liveBox").title = s ? `${s.source || ""}${autoActive() ? ` · новые анкеты забираются каждые ${cfg().auto_refresh_min} мин` : ""}` : "";
 }
 
 async function refreshState() {
@@ -300,17 +302,33 @@ async function refreshState() {
   renderSidebar();
 }
 
-async function runChecks() {
+const RESULT_PAGES = ["overview", "daily", "defects", "map", "interviewers", "quotas", "review", "anketas", "answers", "repetition"];
+async function runChecks(stay) {
   await guarded(async () => {
     clearTimeout(saveTimer);
     savePending = false;   // настройки уходят вместе с запросом проверки
     S.result = await POST("/api/run", { config: S.state.config });
+    S.lastRefresh = null;
     await refreshState();
     scheduleAuto();
     const s = S.result.summary;
     toast(`Проверено ${fmt(s.interviews)} анкет · брак ${fmt(s.defects)} (${fmt(s.defect_pct, 1)}%)`);
-    go("overview");
+    go(stay && RESULT_PAGES.includes(S.page) ? S.page : "overview");
   }, "Проверяю анкеты…");
+}
+
+// Кнопка ↻ и автозапуск: забрать свежие анкеты из таблиц проекта и проверить.
+async function refreshAll(silentStart) {
+  const ids = cfg().remote_sources || [];
+  if (ids.length) {
+    const ok = await guarded(async () => { S.state = await POST("/api/source/remote", { ids }); return true; }, "Забираю анкеты из Google-таблиц…");
+    if (!ok) return;
+  } else if (!S.state.sheets.length) {
+    if (!silentStart) toast("Сначала подключите таблицу с анкетами", true);
+    return go("data");
+  }
+  await runChecks(!silentStart);
+  if (!S.result) openSetup("columns");
 }
 
 async function exportReport(kind) {
@@ -335,7 +353,8 @@ async function pageData(root) {
   const fileInput = h("input", { type: "file", accept: ".xlsx,.xlsm,.xls", hidden: true, onchange: (e) => e.target.files[0] && upload(e.target.files[0]) });
   async function upload(file) {
     const fd = new FormData(); fd.append("file", file);
-    await guarded(async () => { S.state = await call("POST", "/api/source/file", fd, true); S.result = null; renderSidebar(); go("data"); toast(`Файл «${file.name}» загружен`); }, "Читаю файл…");
+    const ok = await guarded(async () => { S.state = await call("POST", "/api/source/file", fd, true); S.result = null; renderSidebar(); return true; }, "Читаю файл…");
+    if (ok) { await runChecks(); if (!S.result) openSetup("columns"); }
   }
   const drop = h("div", { class: "drop", onclick: () => fileInput.click(),
     ondragover: (e) => { e.preventDefault(); drop.classList.add("over"); },
@@ -402,16 +421,24 @@ function pageForm(root) {
           t.values = e.target.checked ? [...new Set([...t.values, v.value])] : t.values.filter((x) => x !== v.value); saveConfigSoon();
         } }), h("span", {}, v.value), h("span", { class: "muted small" }, ` · ${fmt(v.n)}`)))));
   }
-  const hint = (S.state.technical_hint || [])[0];
-  const same = hint && t.col === hint.col && hint.values.every((v) => t.values.includes(v));
+  const hint = (S.state.technical_hint || []).find((x) => x.sure) || (S.state.technical_hint || [])[0];
+  const techAuto = !t.col && t.auto !== false && hint && hint.sure;
+  const status = t.col
+    ? h("div", { class: "notice ok" }, h("div", { style: "flex:1" }, "Технические записи берутся из колонки ", h("b", {}, `«${t.col}»`), " — выбрано вручную."),
+      h("button", { class: "btn small", onclick: () => { t.col = null; t.values = []; t.auto = true; saveConfigSoon(); go("form"); } }, "Вернуть автоматически"))
+    : techAuto ? h("div", { class: "notice ok" }, h("div", { style: "flex:1" }, "✓ Найдено автоматически: колонка ", h("b", {}, `«${hint.col}»`),
+        hint.mode === "filled" ? " (заполнена — значит техническая запись)" : [": ", h("b", {}, hint.values.map((v) => `«${v}»`).join(", "))], ` — ${fmt(hint.n)} записей. Ничего делать не нужно.`),
+      h("button", { class: "btn small", onclick: () => { t.auto = false; saveConfigSoon(); go("form"); } }, "Это не технические записи"))
+    : hint ? h("div", { class: "notice info" }, h("div", { style: "flex:1" }, "Похоже, в колонке ", h("b", {}, `«${hint.col}»`), " есть технические записи",
+        hint.values.length ? [": ", h("b", {}, hint.values.map((v) => `«${v}»`).join(", "))] : "", ` — ${fmt(hint.n)} шт.`),
+      h("button", { class: "btn small primary", onclick: () => { t.col = hint.col; t.mode = hint.mode; t.values = [...hint.values]; saveConfigSoon(); go("form"); } }, "Применить"))
+    : h("div", { class: "notice info" }, "Технических записей в этой выгрузке не нашлось. Если они есть — выберите колонку ниже.");
   root.append(h("div", { class: "card" },
     h("h2", {}, "Технические записи"),
-    h("p", { class: "hint" }, "Иногда интервьюер не проводит опрос, а выполняет задание: например, снимает видео, что поблизости нет рекламы. Такая запись короткая и идёт сразу за интервью — без этой настройки система сочтёт её браком. Технические записи не проверяются как интервью (длительность, интервалы, «конвейер», зондаж, правила), не идут в квоты и в чистую базу. Место (GPS) у них проверяется."),
-    hint && !same ? h("div", { class: "notice info" }, h("div", { style: "flex:1" }, "Похоже, в колонке ", h("b", {}, `«${hint.col}»`), " есть технические записи: ",
-      h("b", {}, hint.values.map((v) => `«${v}»`).join(", ")), ` — ${fmt(hint.n)} шт.`),
-      h("button", { class: "btn small primary", onclick: () => { t.col = hint.col; t.values = [...hint.values]; saveConfigSoon(); go("form"); } }, "Применить")) : null,
-    h("div", { class: "form-list" }, formRow("Колонка с типом записи", "Например «Тип записи» / «Вид задания». Пусто — технических записей в проекте нет",
-      select(S.state.columns, t.col, (v) => { t.col = v; t.values = []; saveConfigSoon(); drawValues(); }, "— нет технических записей —"))),
+    h("p", { class: "hint" }, "Иногда интервьюер не проводит опрос, а выполняет задание: например, снимает видео, что поблизости нет рекламы. Такая запись не проверяется как интервью, не идёт в квоты и в норму. И главное: если интервьюер сразу после видео начал интервью — это не брак «нет перерыва». Место (GPS) у технических записей проверяется."),
+    status,
+    h("div", { class: "form-list" }, formRow("Выбрать колонку вручную", "«Тип записи» / «Вид задания» и значения, которые означают техническую запись",
+      select(S.state.columns, t.col, (v) => { t.col = v; t.mode = "values"; t.values = []; if (!v) t.auto = true; saveConfigSoon(); go("form"); }, techAuto ? "— автоматически —" : "— не выбрано —"))),
     valuesBox));
   drawValues();
 
@@ -711,7 +738,9 @@ async function pageHistory(root) {
 function teamSourcesCard() {
   const c = cfg();
   const all = S.state.remote_sources || [];
-  const chosen = new Set(c.remote_sources || []);
+  // по умолчанию отмечены таблицы этого проекта (или единственная таблица)
+  const mine = all.filter((x) => x.project === S.state.project).map((x) => x.id);
+  const chosen = new Set((c.remote_sources || []).length ? c.remote_sources : (mine.length ? mine : all.length === 1 ? [all[0].id] : []));
   const list = h("div", { class: "src-list" });
   const drawList = () => list.replaceChildren(...(all.length ? all.map((src) => h("label", { class: "src" },
     h("input", { type: "checkbox", checked: chosen.has(src.id), onchange: (e) => { e.target.checked ? chosen.add(src.id) : chosen.delete(src.id); } }),
@@ -733,10 +762,10 @@ function teamSourcesCard() {
       S.result = null; renderSidebar();
       toast("Анкеты загружены из Google Sheets");
     }, "Загружаю анкеты из Google Sheets…");
-    if (thenRun && S.state.sheets.length) await runChecks(); else go("data");
+    if (thenRun && S.state.sheets.length) { await runChecks(); if (!S.result) openSetup("columns"); } else go("data");
   }
 
-  const name = h("input", { type: "text", placeholder: "Например: Ташкент — сентябрь", style: "flex:1;min-width:200px" });
+  const name = h("input", { type: "text", placeholder: "Название (необязательно)", style: "flex:1;min-width:180px" });
   const url = h("input", { type: "url", placeholder: "https://docs.google.com/spreadsheets/d/…", style: "flex:2;min-width:260px" });
   const sheet = h("input", { type: "text", placeholder: "Лист (необязательно)", style: "width:170px" });
   const email = S.state.server_email;
@@ -749,11 +778,14 @@ function teamSourcesCard() {
     h("div", { class: "row" }, name, url, sheet,
       h("button", { class: "btn", onclick: async () => {
         await guarded(async () => {
-          S.state.remote_sources = await POST("/api/remote/sources/add", { name: name.value, url: url.value, sheet: sheet.value });
-          const added = S.state.remote_sources.find((x) => x.name === name.value.trim());
-          if (added) { const cc = cfg(); cc.remote_sources = [...new Set([...(cc.remote_sources || []), added.id])]; saveConfigSoon(); }
-          toast("Таблица подключена"); go("data");
+          // название необязательно — сервер требует его, подставим своё
+          const title = name.value.trim() || `${S.state.project} — таблица ${all.length + 1}`;
+          S.state.remote_sources = await POST("/api/remote/sources/add", { name: title, url: url.value, sheet: sheet.value });
+          const added = S.state.remote_sources.find((x) => x.name === title) || S.state.remote_sources[S.state.remote_sources.length - 1];
+          if (added) { const cc = cfg(); cc.remote_sources = [...new Set([...(cc.remote_sources || []), added.id])]; await flushConfig(); }
+          toast("Таблица подключена — проверяю анкеты");
         }, "Проверяю доступ к таблице…");
+        if ((cfg().remote_sources || []).length) await refreshAll();
       } }, "Подключить")));
 
   const freq = select([["0", "выключено"], ["5", "каждые 5 минут"], ["10", "каждые 10 минут"], ["15", "каждые 15 минут"], ["30", "каждые 30 минут"], ["60", "каждый час"]],
@@ -768,8 +800,7 @@ function teamSourcesCard() {
       h("button", { class: "btn small ghost", onclick: async () => { await guarded(async () => { S.state.remote_sources = await GET("/api/remote/sources"); go("data"); }); } }, "Обновить список")),
     list,
     all.length ? h("div", { class: "row", style: "margin-top:14px" },
-      h("button", { class: "btn", onclick: () => load(false) }, "Загрузить"),
-      h("button", { class: "btn primary", onclick: () => load(true) }, svg('<path d="M6.5 4.5v11l9-5.5z"/>'), "Загрузить и проверить")) : null,
+      h("button", { class: "btn primary", onclick: () => load(true) }, svg('<path d="M6.5 4.5v11l9-5.5z"/>'), "Проверить отмеченные таблицы")) : null,
     h("div", { class: "form-list", style: "margin-top:16px" },
       formRow("Автоматическая проверка", "Приложение само забирает новые анкеты из отмеченных таблиц и перепроверяет всё, пока открыто", h("div", { class: "row" }, live, freq))),
     addForm);
@@ -1038,14 +1069,35 @@ function planEditor(g) {
 }
 
 // ── Проверка анкет руководителем ─────────────────────────────────────────────
-function reviewFilters() {
-  return {
+// Выборка на прозвон (back-check), как принято в контроле качества полевых
+// работ: все анкеты «проверить» без решения + 10% анкет «норма» у каждого
+// интервьюера (минимум одна). Выборка постоянная — не меняется при обновлении.
+function backcheck() {
+  if (S._bc && S._bc.src === S.result) return S._bc.set;
+  const set = new Set();
+  const hash = (p) => (Math.imul(p + 1, 2654435761) >>> 0) % 1000;
+  for (const [, list] of groupBy(S.result.anketas.filter((a) => !a.technical), "inter")) {
+    list.filter((a) => stateOf(a) === "warn" && !a.decision).forEach((a) => set.add(a.pos));
+    const ok = list.filter((a) => stateOf(a) === "ok" && !a.decision).sort((x, y) => hash(x.pos) - hash(y.pos));
+    ok.slice(0, Math.max(1, Math.round(ok.length * 0.1))).forEach((a) => set.add(a.pos));
+  }
+  S._bc = { src: S.result, set };
+  return set;
+}
+
+function reviewFilters(rv) {
+  const st = (a) => stateOf(a);
+  const f = {
     todo: ["Нужно решить", (a) => (a.defect || a.warning) && !a.decision && !a.technical],
-    call: ["На перезвон", (a) => a.decision === "На перезвон"],
-    brak: ["Брак", (a) => a.decision === "Брак"],
-    ok: ["Принято", (a) => a.decision === "Принять"],
-    all: ["Все подозрительные", (a) => a.defect || a.warning || a.decision],
+    brak: ["Брак", (a) => st(a) === "brak"],
+    warn: ["Проверить", (a) => st(a) === "warn"],
+    ok: ["Норма", (a) => st(a) === "ok"],
+    call: ["На прозвон", (a) => backcheck().has(a.pos)],
+    tech: ["Тех. записи", (a) => a.technical],
+    all: ["Все", () => true],
   };
+  if (!rv.enabled) delete f.todo;
+  return f;
 }
 
 async function decide(positions, decision, comment) {
@@ -1061,34 +1113,40 @@ async function decide(positions, decision, comment) {
 function pageReview(root) {
   if (!S.result) return noResult(root);
   const rv = S.result.summary.review;
-  if (!rv.enabled) {
-    root.append(h("div", { class: "card" }, h("div", { class: "empty" }, h("b", {}, "Решения по анкетам недоступны"),
-      !/^Google Sheets/.test(S.result.summary.source || "")
-        ? "Решения сохраняются в Google-таблицу, откуда пришли анкеты. Загрузите анкеты из подключённой таблицы на странице «Данные»."
-        : "Выберите колонку «ID анкеты» на странице «Колонки» — по ней сохраняются решения.",
-      h("div", { style: "margin-top:14px" }, h("button", { class: "btn", onclick: () => go("data") }, "К данным")))));
-    return;
-  }
-  const all = S.result.anketas;
-  const filters = reviewFilters();
-  const rows = all.filter(filters[S.reviewFilter][1]);
+  root.append(filterBar("review"));
+  const all = scoped();
+  const filters = reviewFilters(rv);
+  if (!filters[S.reviewFilter]) S.reviewFilter = rv.enabled ? "todo" : "brak";
+  const rows = all.filter(filters[S.reviewFilter][1]).map((a) => ({ ...a, st: stateOf(a),
+    why: (a.issues.find((i) => i[0] === a.primary) || [])[3] || "", what: (a.issues.find((i) => i[0] === a.primary) || [])[4] || "",
+    block: [...new Set(a.issues.map((i) => i[2]))].join(", ") }));
   const visible = new Set(rows.map((r) => r.pos));
   [...S.sel].forEach((p) => { if (!visible.has(p)) S.sel.delete(p); });
+  const canDecide = rv.enabled && rv.can_decide;
 
-  root.append(h("div", { class: "stats" },
-    h("div", { class: "stat yellow" }, h("div", { class: "k" }, "Нужно решить"), h("div", { class: "v" }, fmt(rv.todo)), h("div", { class: "s" }, "подозрительные без решения")),
-    h("div", { class: "stat red" }, h("div", { class: "k" }, "❌ Брак"), h("div", { class: "v" }, fmt(rv["Брак"]))),
-    h("div", { class: "stat" }, h("div", { class: "k" }, "📞 На перезвон"), h("div", { class: "v" }, fmt(rv["На перезвон"]))),
-    h("div", { class: "stat" }, h("div", { class: "k" }, "✅ Принято"), h("div", { class: "v" }, fmt(rv["Принять"])))));
+  if (!rv.enabled) {
+    root.append(h("div", { class: "notice info" }, h("div", {}, h("b", {}, "Решения по анкетам сейчас недоступны. "),
+      !/^Google Sheets/.test(S.result.summary.source || "")
+        ? "Решения сохраняются в Google-таблицу, откуда пришли анкеты, — а сейчас проверяется файл Excel."
+        : "Выберите колонку «ID анкеты» в настройке проверки (шаг «Колонки»).")));
+  } else if (!rv.can_decide) {
+    root.append(h("div", { class: "notice info" }, "Решения ставит руководитель проекта. Вы видите их, но менять не можете."));
+  }
+  if (rv.enabled) {
+    root.append(h("div", { class: "stats" },
+      tile("Нужно решить", fmt(rv.todo), "подозрительные без решения", "yellow", () => { S.reviewFilter = "todo"; go("review"); }),
+      tile("❌ Брак", fmt(rv["Брак"]), "решение руководителя", "red"),
+      tile("📞 На перезвон", fmt(rv["На перезвон"]), "решение руководителя"),
+      tile("✅ Принято", fmt(rv["Принять"]), "решение руководителя", "green")));
+  }
 
   const count = h("span", { class: "count" });
   const comment = h("input", { type: "text", placeholder: "Комментарий (необязательно): «респондент подтвердил», «не дозвонились»…" });
-  const updateCount = () => { count.textContent = S.sel.size ? `Выбрано: ${S.sel.size}` : "Отметьте анкеты"; };
+  const updateCount = () => { count.textContent = S.sel.size ? `Выбрано: ${S.sel.size}` : "Отметьте анкеты галочкой"; };
   updateCount();
-  const bulk = rv.can_decide ? h("div", { class: "bulk" }, count, comment,
+  const bulk = canDecide ? h("div", { class: "bulk" }, count, comment,
     ...["Брак", "Принять", "На перезвон"].map((d) => h("button", { class: `btn ${DECISION_CLASS[d]}`, onclick: async () => { await decide([...S.sel], d, comment.value); go("review"); } }, `${DECISION_ICON[d]} ${d}`)),
-    h("button", { class: "btn ghost", onclick: async () => { await decide([...S.sel], "", ""); go("review"); } }, "Снять решение"))
-    : h("div", { class: "notice info" }, "Решения ставит руководитель проекта. Вы видите их, но менять не можете.");
+    h("button", { class: "btn ghost", onclick: async () => { await decide([...S.sel], "", ""); go("review"); } }, "Снять решение")) : null;
 
   const seg = h("div", { class: "segmented" }, Object.entries(filters).map(([k, [label, fn]]) =>
     h("button", { class: S.reviewFilter === k ? "on" : "", onclick: () => { S.reviewFilter = k; S.sel.clear(); go("review"); } }, `${label} · ${fmt(all.filter(fn).length)}`)));
@@ -1099,26 +1157,28 @@ function pageReview(root) {
     updateCount();
   } });
   const cols = [
-    ...(rv.can_decide ? [{ key: "chk", label: "", render: (r) => h("input", { type: "checkbox", checked: S.sel.has(r.pos),
+    ...(canDecide ? [{ key: "chk", label: "", render: (r) => h("input", { type: "checkbox", checked: S.sel.has(r.pos),
       onclick: (e) => e.stopPropagation(), onchange: (e) => { e.target.checked ? S.sel.add(r.pos) : S.sel.delete(r.pos); updateCount(); } }) }] : []),
-    { key: "decision", label: "Решение", render: (r) => decisionTag(r.decision) },
+    { key: "st", label: "", render: (r) => h("span", { class: `st ${ST[r.st].cls}`, title: ST[r.st].label }, ST[r.st].icon), sortVal: (r) => ({ brak: 3, warn: 2, ok: 1, tech: 0 })[r.st] },
     { key: "risk", label: "Риск", num: true, render: (r) => riskTag(r.risk) },
-    { key: "id", label: "ID анкеты" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
-    { key: "start", label: "Старт", sortVal: (r) => r.start && r.start.split(/[. :]/).reverse().join("") },
-    { key: "reasons", label: "Почему система отметила", wrap: true, render: (r) => r.reasons || r.warnings },
-    { key: "decision_comment", label: "Комментарий", wrap: true, render: (r) => r.decision_comment ? `${r.decision_comment} (${r.decision_by})` : "" },
+    { key: "id", label: "ID" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
+    { key: "start", label: "Когда", sortVal: (r) => r.start && r.start.split(/[. :]/).reverse().join("") },
+    { key: "why", label: "Почему", wrap: true, render: (r) => r.why ? h("div", {}, h("b", {}, r.why), h("div", { class: "muted small" }, r.what)) : (r.technical ? h("span", { class: "muted" }, "техническая запись") : "") },
+    { key: "block", label: "Блок", wrap: true },
+    { key: "decision", label: "Решение", render: (r) => h("div", {}, decisionTag(r.decision), r.decision_comment ? h("div", { class: "muted small" }, `${r.decision_comment} (${r.decision_by})`) : null) },
   ];
   const tbl = table(cols, rows, { tools: seg, height: 620, onClick: (r) => openAnketa(r.pos), sortKey: "risk", asc: false,
-    rowClass: (r) => r.defect ? "row-RED" : r.warning ? "row-YELLOW" : "", empty: S.reviewFilter === "todo" ? "Все подозрительные анкеты разобраны 🎉" : "Нет анкет" });
-  if (rv.can_decide) {
+    rowClass: (r) => (r.st === "brak" ? "row-RED" : r.st === "warn" ? "row-YELLOW" : ""),
+    empty: S.reviewFilter === "todo" ? "Все подозрительные анкеты разобраны 🎉" : "Нет анкет" });
+  if (canDecide) {
     const th = tbl.querySelector("thead th");
     th.className = "chk"; th.replaceChildren(checkAll); th.onclick = null;
     tbl.querySelectorAll("tbody td:first-child").forEach((td) => td.classList.add("chk"));
   }
   root.append(bulk, h("div", { class: "card" },
-    h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Анкеты на проверку"),
-      h("p", { class: "hint" }, "Сначала самые подозрительные (по баллу риска). Нажмите на строку — откроется объяснение, почему система отметила анкету, и исходная строка из Google-таблицы. Решения записываются на лист «Решения ОТК» той же таблицы и видны всей команде.")),
-      h("button", { class: "btn", onclick: () => exportReport("clean") }, "Чистая база (Excel)")),
+    h("p", { class: "hint" }, S.reviewFilter === "call"
+      ? "Выборка на прозвон: все анкеты «проверить» без решения и 10% анкет без замечаний у каждого интервьюера (минимум одна). Позвоните респондентам и поставьте решение. Так принято в контроле качества — прозванивать часть и «нормальных» анкет."
+      : "Нажмите на строку — откроется объяснение, почему система отметила анкету, место на карте и исходная строка из таблицы."),
     tbl));
 }
 
@@ -1318,20 +1378,30 @@ async function enterApp() {
   if (S.state.has_result) { try { S.result = await GET("/api/result"); } catch (e) { /* нет результата */ } }
   renderSidebar();
   scheduleAuto();
-  go(S.result ? "overview" : "data");
+  if (S.result) return go("overview");
+  // Открыли программу — сразу забираем анкеты и показываем сводку, без лишних кнопок
+  if ((cfg().remote_sources || []).length || S.state.sheets.length) return refreshAll(true);
+  go("data");
 }
 window.addEventListener("resize", () => { if (S.result && ["overview", "defects", "interviewers"].includes(S.page) && $("#modal").hidden) { clearTimeout(S._rs); S._rs = setTimeout(() => go(S.page), 250); } });
 
 async function init() {
   document.querySelectorAll("#nav a").forEach((a) => a.addEventListener("click", () => (a.dataset.page === "setup" ? openSetup() : go(a.dataset.page))));
-  $("#runBtn").addEventListener("click", runChecks);
+  $("#runBtn").addEventListener("click", () => refreshAll());
   $("#exportBtn").addEventListener("click", () => exportReport("full"));
   $("#wordBtn").addEventListener("click", () => exportReport("word"));
+  $("#moreBtn").addEventListener("click", (e) => { e.stopPropagation(); $("#morePop").hidden = !$("#morePop").hidden; });
+  document.addEventListener("click", (e) => { if (!e.target.closest(".menu-wrap")) $("#morePop").hidden = true; });
+  document.querySelectorAll("#morePop [data-page]").forEach((b) => b.addEventListener("click", () => (b.dataset.page === "setup" ? openSetup() : go(b.dataset.page))));
+  document.querySelectorAll("#morePop [data-export]").forEach((b) => b.addEventListener("click", () => { $("#morePop").hidden = true; exportReport(b.dataset.export); }));
+  $("#pwdBtn").addEventListener("click", () => { $("#morePop").hidden = true; changePassword(); });
+  $("#logoutBtn").addEventListener("click", () => { $("#morePop").hidden = true; logout(); });
   $("#modalClose").addEventListener("click", closeModal);
   $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
   $("#projectSelect").addEventListener("change", async (e) => {
-    await guarded(async () => { S.state = await POST("/api/project/open", { name: e.target.value }); S.result = null; renderSidebar(); scheduleAuto(); go("data"); });
+    const ok = await guarded(async () => { S.state = await POST("/api/project/open", { name: e.target.value }); S.result = null; S.f = {}; renderSidebar(); scheduleAuto(); return true; });
+    if (ok) { if ((cfg().remote_sources || []).length) refreshAll(true); else go("data"); }
   });
   $("#newProjectBtn").addEventListener("click", async () => {
     const name = prompt("Название нового проекта (например: Uzum Bank — сентябрь)");

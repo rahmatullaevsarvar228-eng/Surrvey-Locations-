@@ -329,15 +329,35 @@ def test_technical_records_skip_interview_checks(cfg):
     from anketa_qc import blocks
     hint = blocks.suggest_technical(df_in)
     assert hint and hint[0]["col"] == "Тип записи" and hint[0]["values"] == ["Техническое задание (видео)"]
-    # без настройки видео — «короткая анкета» и «нет перерыва»
-    codes = _codes(engine.run(df_in, cfg))
-    assert {"too_short", "no_rest"} <= codes["1001"]
-    cfg["technical"] = {"col": "Тип записи", "values": ["Техническое задание (видео)"]}
+    # распознаётся само — без настройки
     res = engine.run(df_in, cfg)
     codes = _codes(res)
     assert not codes["1001"] and not codes["1002"]
     df = res["df"].set_index("row_id")
     assert df.loc["1001", "technical"] and not df.loc["1001", "completed"]
+    assert res["technical_info"]["auto"] and res["technical_info"]["n"] == 1
+    # если выключить автоопределение — видео выглядит как короткая анкета без перерыва
+    cfg["technical"] = {"col": None, "values": [], "auto": False}
+    codes = _codes(engine.run(df_in, cfg))
+    assert {"too_short", "no_rest"} <= codes["1001"]
+
+
+def test_gap_after_technical_task_is_not_defect(cfg):
+    """Интервью → сразу видео по заданию → через секунды следующее интервью:
+    не брак. Интервью → через 30 секунд следующее интервью: брак."""
+    rows = [make_row(0, "D1", "A", "2025-09-01 10:00:00", 15),          # до 10:15:00
+            make_row(1, "D1", "A", "2025-09-01 10:15:10", 0.7),         # видео до 10:15:52
+            make_row(2, "D1", "A", "2025-09-01 10:15:53", 15),          # до 10:30:53
+            make_row(3, "D1", "A", "2025-09-01 10:31:23", 15),          # через 30 с после интервью
+            make_row(4, "D1", "A", "2025-09-01 11:00:00", 15)]
+    for r, kind in zip(rows, ["Интервью", "Видео по заданию", "Интервью", "Интервью", "Интервью"]):
+        r["Тип записи"] = kind
+    res = engine.run(pd.DataFrame(rows), cfg)
+    codes = _codes(res)
+    assert not codes["1001"] and not codes["1002"] and not codes["1004"]
+    assert "no_rest" in codes["1003"]
+    text = next(t for c, _, t in res["df"].set_index("row_id").loc["1003", "issues"] if c == "no_rest")
+    assert "1002" in text and "0.5 мин" in text
 
 
 def test_out_of_city_and_region(cfg):
