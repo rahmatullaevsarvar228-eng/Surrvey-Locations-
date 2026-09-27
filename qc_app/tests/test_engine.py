@@ -458,3 +458,57 @@ def test_technical_rows_without_city_are_kept(cfg):
     assert res["df"]["technical"].sum() == 1 and res["technical_info"]["sheet_rows"] == 1
     # без листа с ТЗ та же пара интервью — брак «нет перерыва»
     assert "no_rest" in _codes(engine.run(pd.DataFrame(rows), cfg))["1001"]
+
+
+def _survey(n_inter=6, per=20, seed=3):
+    """Анкета с 20 вопросами-оценками и отметками времени блоков."""
+    import random
+    rnd = random.Random(seed)
+    rows, k = [], 0
+    for it in range(n_inter):
+        t = pd.Timestamp("2025-09-01 09:00")
+        for j in range(per):
+            r = make_row(k, f"D{it}", f"I{it}", str(t), 20)
+            for q in range(20):
+                r[f"Q{q}"] = rnd.choice([1, 2, 3, 3, 4, 4, 5])
+            r["t2"] = (t + pd.Timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S")
+            r["t3"] = (t + pd.Timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%S")
+            rows.append(r)
+            t += pd.Timedelta(minutes=40)
+            k += 1
+    return rows
+
+
+def test_near_duplicates_percent_match(cfg):
+    rows = _survey()
+    copy = dict(rows[5], _id=9999, deviceid="D0", start="2025-09-01T23:00:00.000+05:00", end="2025-09-01T23:20:00.000+05:00")
+    rows.append(copy)                                       # полная копия анкеты 1005
+    near = dict(rows[7], _id=9998, start="2025-09-02T08:00:00.000+05:00", end="2025-09-02T08:20:00.000+05:00")
+    for q in range(3):
+        near[f"Q{q}"] = 5 if near[f"Q{q}"] != 5 else 1       # 3 ответа из ~25 изменены
+    rows.append(near)
+    res = engine.run(pd.DataFrame(rows), cfg)
+    df = res["df"].set_index("row_id")
+    sev = {rid: {c: s for c, s, _ in xs} for rid, xs in df["issues"].items()}
+    assert sev["9999"]["near_dup"] == "defect" and sev["1005"]["near_dup"] == "defect"
+    assert sev["9998"]["near_dup"] == "warning"
+    others = [rid for rid, x in sev.items() if "near_dup" in x and rid not in ("9999", "1005", "9998", "1007")]
+    assert not others, others                              # у честных случайных анкет копий нет
+
+
+def test_block_fast_and_answer_patterns(cfg):
+    rows = _survey()
+    for r in rows:
+        if r["Код интервьюера"] == "I2":                    # «пролетает» второй блок
+            s = pd.Timestamp(r["start"][:19])
+            r["t3"] = (s + pd.Timedelta(minutes=6)).strftime("%Y-%m-%dT%H:%M:%S")
+        if r["Код интервьюера"] == "I4":                    # «придумывает»: почти всё 5
+            for q in range(20):
+                r[f"Q{q}"] = 5
+    res = engine.run(pd.DataFrame(rows), cfg)
+    df = res["df"]
+    fast = set(df.loc[df["issues"].map(lambda xs: any(c == "block_fast" for c, _, _ in xs)), "inter"])
+    assert fast == {"I2"}
+    assert [b["block"] for b in res["block_times"]] == ["старт → t2", "t2 → t3", "t3 → финиш"]
+    pats = {p["inter"] for p in res["answer_patterns"]}
+    assert pats == {"I4"}, res["answer_patterns"]

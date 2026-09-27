@@ -331,9 +331,9 @@ async function refreshAll(silentStart) {
   if (!S.result) openSetup("columns");
 }
 
-async function exportReport(kind) {
+async function exportReport(kind, only) {
   // Отчёт Word строится по текущим фильтрам дашборда (регион, город, интервьюер)
-  const f = kind === "word" ? Object.fromEntries(Object.entries(S.f || {}).filter(([k, v]) => v && k !== "date")) : {};
+  const f = only || (kind === "word" ? Object.fromEntries(Object.entries(S.f || {}).filter(([k, v]) => v && k !== "date")) : {});
   if (window.pywebview && window.pywebview.api) {
     busy(true, "Готовлю отчёт…");
     let r;
@@ -531,6 +531,19 @@ function pageChecks(root) {
       formRow("Массовое открытие анкет", "Столько анкет открыто на одном устройстве почти одновременно — их открыли заранее и заполняют без респондента. Анкета, открытая до окончания предыдущей, отмечается всегда",
         [number(t, "mass_open_count", 2, 50), h("span", { class: "unit" }, "анкет за"), number(t, "mass_open_sec", 10, 1800, 10), h("span", { class: "unit" }, "сек")]))),
   );
+  const q = c.quality || (c.quality = {});
+  const L = c.listen || (c.listen = { base_pct: 5, new_pct: 15, risk_pct: 20 });
+  root.append(h("div", { class: "card" }, h("h2", {}, "Международные методы"),
+    h("p", { class: "hint" }, "Методы, которые применяют Pew Research, Всемирный банк и стандарт ISO 20252: поиск копий анкет, время по блокам, выборка на прослушку."),
+    h("div", { class: "form-list" },
+      formRow("Почти одинаковые анкеты", "Совпадает столько ответов с другой анкетой — «проверить»; от второго порога — брак (копия). Сравниваются только анкеты, где общих вопросов не меньше минимума",
+        [number(q, "near_dup_pct", 50, 100), h("span", { class: "unit" }, "% проверить"), number(q, "near_dup_defect_pct", 50, 100), h("span", { class: "unit" }, "% брак"),
+          number(q, "near_dup_min_q", 5, 200), h("span", { class: "unit" }, "вопросов мин.")]),
+      formRow("Блок пройден слишком быстро", "Если в форме Kobo есть отметки времени начала блоков (calculate с now()) — блок быстрее этой доли обычного времени отмечается",
+        [number(q, "block_fast_pct", 5, 90), h("span", { class: "unit" }, "% обычного времени"), sev(q, "block_severity")]),
+      formRow("Необычные ответы интервьюера", "Сравнивать ответы респондентов каждого интервьюера с остальными (сигнал для проверки, не брак)", toggle(q, "patterns")),
+      formRow("Выборка на прослушку", "Доля случайных анкет у каждого интервьюера: обычно / новые (первые 2 дня) / в зоне риска",
+        [number(L, "base_pct", 0, 100), h("span", { class: "unit" }, "%"), number(L, "new_pct", 0, 100), h("span", { class: "unit" }, "%"), number(L, "risk_pct", 0, 100), h("span", { class: "unit" }, "%")]))));
   const nightRows = h("div", {});
   const drawNight = () => nightRows.replaceChildren(...(n.enabled ? [
     formRow("Рабочее время с", null, [number(n, "work_start_hour", 0, 23), h("span", { class: "unit" }, "ч")]),
@@ -1181,6 +1194,7 @@ function reviewFilters(rv) {
     warn: ["Проверить", (a) => st(a) === "warn"],
     ok: ["Норма", (a) => st(a) === "ok"],
     call: ["На прозвон", (a) => backcheck().has(a.pos)],
+    listen: ["На прослушку", (a) => !!a.listen],
     tech: ["Тех. записи", (a) => a.technical],
     all: ["Все", () => true],
   };
@@ -1251,7 +1265,10 @@ function pageReview(root) {
     { key: "risk", label: "Риск", num: true, render: (r) => riskTag(r.risk) },
     { key: "id", label: "ID" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
     { key: "start", label: "Когда", sortVal: (r) => r.start && r.start.split(/[. :]/).reverse().join("") },
-    { key: "why", label: "Почему", wrap: true, render: (r) => r.why ? h("div", {}, h("b", {}, r.why), h("div", { class: "muted small" }, r.what)) : (r.technical ? h("span", { class: "muted" }, "техническая запись") : "") },
+    { key: "why", label: "Почему", wrap: true, render: (r) => r.why ? h("div", {}, h("b", {}, r.why), h("div", { class: "muted small" }, r.what),
+      S.reviewFilter === "listen" ? h("div", { class: "small", style: "color:var(--accent)" }, r.listen) : null)
+      : S.reviewFilter === "listen" ? h("span", { class: "small", style: "color:var(--accent)" }, r.listen)
+      : (r.technical ? h("span", { class: "muted" }, "техническая запись") : "") },
     { key: "block", label: "Блок", wrap: true },
     { key: "decision", label: "Решение", render: (r) => h("div", {}, decisionTag(r.decision), r.decision_comment ? h("div", { class: "muted small" }, `${r.decision_comment} (${r.decision_by})`) : null) },
   ];
@@ -1264,6 +1281,11 @@ function pageReview(root) {
     tbl.querySelectorAll("tbody td:first-child").forEach((td) => td.classList.add("chk"));
   }
   root.append(bulk, h("div", { class: "card" },
+    S.reviewFilter === "listen" ? h("div", { class: "notice info" }, h("div", { style: "flex:1" },
+      "Выборка для группы мониторинга (прослушка аудиозаписей): все подозрительные анкеты без решения и случайная доля остальных у каждого интервьюера — ",
+      `${cfg().listen.base_pct}%, у новых ${cfg().listen.new_pct}%, у интервьюеров в зоне риска ${cfg().listen.risk_pct}%. Выборка постоянная. `,
+      "Скачайте список, прослушайте записи и поставьте «1» в колонке брака — программа подхватит это сама."),
+      h("button", { class: "btn primary", onclick: () => exportReport("listen") }, "Скачать список (Excel)")) : null,
     h("p", { class: "hint" }, S.reviewFilter === "call"
       ? "Выборка на прозвон: все анкеты «проверить» без решения и 10% анкет без замечаний у каждого интервьюера (минимум одна). Позвоните респондентам и поставьте решение. Так принято в контроле качества — прозванивать часть и «нормальных» анкет."
       : "Нажмите на строку — откроется объяснение, почему система отметила анкету, место на карте и исходная строка из таблицы."),

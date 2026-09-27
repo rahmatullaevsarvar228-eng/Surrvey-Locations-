@@ -114,6 +114,13 @@ DEFAULT_CONFIG = {
         "plan": {},                  # {город: {"points": [{lat, lon, street_ru}]}}
     },
     "quotas": {"by_city": True, "dims": [], "plan": []},
+    # Международные методы контроля: копии анкет (percent match), время по
+    # блокам (поля-отметки времени в форме), необычные ответы интервьюера.
+    "quality": {"near_dup": True, "near_dup_pct": 85, "near_dup_min_q": 15, "near_dup_severity": "warning",
+                "near_dup_defect_pct": 95,
+                "block_fast_pct": 25, "block_severity": "warning", "patterns": True},
+    # Выборка на прослушку аудио: доля случайных анкет у каждого интервьюера
+    "listen": {"base_pct": 5, "new_pct": 15, "risk_pct": 20},
     # Норма анкет в день на интервьюера (засчитанных, без брака); 0 — не задана.
     # team — список кодов интервьюеров, чтобы видеть и тех, кто ничего не прислал.
     "daily": {"min": 0, "team": []},

@@ -163,6 +163,17 @@ class Session:
             return f"otchet_KK_{slug}{suffix}_{stamp}.docx", word.build(
                 r, self.config, dec, self.project, self.source_label, q,
                 user=(self.user or {}).get("name") or (self.user or {}).get("login"), filters=filters)
+        if kind == "listen":
+            rows = review.listen_rows(r, self.config, self.decisions_by_pos())
+            if not rows:
+                raise ValueError("Выборка на прослушку пуста")
+            return f"proslushka_{slug}_{stamp}.xlsx", export.simple_report("На прослушку", rows)
+        if kind == "cards":
+            from . import word
+            inter = (filters or {}).get("inter")
+            name = re.sub(r"[^0-9A-Za-zА-Яа-яЁё]+", "_", inter)[:30] if inter else "vse"
+            return f"kartochki_{name}_{stamp}.docx", word.cards(
+                r, self.config, self.decisions_by_pos(), self.project, inter)
         if kind == "clean":
             clean, todo = review.clean_base(r, self.decisions_by_pos())
             return f"chistaya_baza_{slug}_{stamp}.xlsx", export.clean_report(clean, todo, review.technical_rows(r))
@@ -231,6 +242,7 @@ def result_payload(sess):
     def issues_of(x):
         return [[c, sev, b, engine.short_label(c), txt] for (c, sev, txt), b in zip(x.issues, x.blocks)]
 
+    listen = review.listen_sample(r, cfg, dec)
     anketas = [{
         "pos": int(x.pos), "decision": (dec.get(x.pos) or {}).get("decision") or "",
         "decision_comment": (dec.get(x.pos) or {}).get("comment") or "",
@@ -246,7 +258,7 @@ def result_payload(sess):
         "hour": None if pd.isna(x.start) else int(x.start.hour),
         "lat": _clean(x.lat), "lon": _clean(x.lon),
         "point": (_clean(x.geo_point) if has_geo else None), "dist": (_clean(round(x.geo_dist, 2)) if has_geo else None),
-        "primary": _clean(x.primary), "issues": issues_of(x),
+        "primary": _clean(x.primary), "issues": issues_of(x), "listen": listen.get(x.pos, ""),
     } for x in df.itertuples()]
 
     cities = []
@@ -293,6 +305,9 @@ def result_payload(sess):
         "rule_errors": r["rule_errors"],
         "legend": engine.status_legend(cfg),
         "sections": r.get("sections", []),
+        "answer_patterns": _clean_deep(r.get("answer_patterns") or []),
+        "block_times": r.get("block_times") or [],
+        "quality_cols": r.get("quality_cols", 0),
         "labels": {**engine.SHORT_LABELS, **{c: engine.short_label(c) for c in df["primary"].dropna().unique()}},
         "status_cfg": cfg["status"],
         "geo": r.get("geo") or {"enabled": False},

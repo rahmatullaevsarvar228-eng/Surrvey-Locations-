@@ -667,3 +667,8 @@ body.is-admin .menu-pop .admin-only { display: block; }
 .tab-pick label { display: inline-flex; align-items: center; gap: 6px; }
 .src .check.small { font-size: 12px; color: var(--ink-2); }
 .tab-pick select { max-width: 200px; }
+
+.pat-row { padding: 8px; border-radius: 8px; }
+.pat-row:hover { background: var(--fill-2); }
+.pat-notes { margin: 4px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
+.pat-notes li { margin: 2px 0; }

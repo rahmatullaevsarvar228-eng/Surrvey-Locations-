@@ -419,6 +419,12 @@ def build(result, cfg, decisions_by_pos, project, source, quotas_result=None, us
     add_table(doc, ["Статус", "Интервьюер", "Город", "Анкет", "Брак", "% брака", "Главные причины"],
               [r[:-1] for r in inter_rows], widths=[2.6, 2.4, 2.4, 1.4, 1.4, 1.6, 5.2], status_col=0,
               align_right=(3, 4, 5), font_size=8.5)
+    pats = [p for p in result.get("answer_patterns") or []
+            if not (filters or {}).get("inter") or p["inter"] == filters["inter"]]
+    if pats:
+        para(doc, "Необычные ответы респондентов (сравнение с коллегами)", 11, NAVY, bold=True, space_after=2)
+        for p in pats[:10]:
+            bullet(doc, " " + "; ".join(p["notes"][:2]), f"{p['inter']} ({p['city']}):")
     for code in ("RED", "YELLOW"):
         lv = engine.STATUS_LEVELS[code]
         names = [r[1] for r in inter_rows if r[0] == STATUS_TEXT[code]]
@@ -526,6 +532,124 @@ def build(result, cfg, decisions_by_pos, project, source, quotas_result=None, us
             el.text = text
         r._r.append(el)
 
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Карточки интервьюеров — для планёрки с супервайзером
+# ─────────────────────────────────────────────────────────────────────────
+# Что сказать интервьюеру по каждой причине — коротко и по делу.
+ADVICE = {
+    "too_short": "Не торопиться: зачитывать каждый вопрос полностью, дожидаться ответа.",
+    "too_long": "Закрывать анкету сразу после интервью, не оставлять её открытой.",
+    "start_gap": "Между интервью нужно время найти нового респондента — не открывать анкеты одну за другой.",
+    "no_rest": "Начинать следующую анкету только с новым респондентом, а не сразу после предыдущей.",
+    "overlap": "Открывать новую анкету только после того, как закончена предыдущая.",
+    "mass_open": "Не открывать анкеты заранее «пачкой» — одна анкета на одного респондента.",
+    "conveyor": "Слишком много анкет подряд: проверить, что каждое интервью реально проводится.",
+    "night": "Работать только в рабочее время.",
+    "dup_phone": "Не опрашивать одного человека дважды, записывать номер респондента, а не свой.",
+    "dup_name": "Не опрашивать одного человека дважды.",
+    "probe_depth": "Переспрашивать «А ещё?» столько раз, сколько требует инструкция.",
+    "probe_low_avg": "Переспрашивать «А ещё?» в открытых вопросах — у вас ответов заметно меньше, чем у коллег.",
+    "block_empty": "Не пропускать обязательные блоки анкеты.",
+    "grid_same": "Зачитывать каждый пункт сетки, не отмечать один вариант во всех строках.",
+    "near_dup": "Каждая анкета — отдельный респондент: анкеты не копировать и не заполнять по образцу.",
+    "block_fast": "Не «пролетать» блоки: зачитывать вопросы и варианты ответа.",
+    "no_gps": "Включать GPS на телефоне до начала интервью.",
+    "geo_far": "Работать на своей точке опроса, в пределах радиуса.",
+    "geo_city": "Проводить интервью в своём городе, указывать город правильно.",
+    "geo_cluster": "Не делать слишком много анкет в одном месте — переходить по точкам маршрута.",
+    "geo_same": "Координаты должны быть настоящими: не подменять GPS, не копировать анкеты.",
+    "geo_jump": "Проверить время на телефоне и GPS: перемещения между анкетами невозможны по скорости.",
+    "no_device": "Работать только с выданного телефона с включённым Device ID.",
+    "device_multi_inter": "Каждый интервьюер работает со своего телефона и под своим кодом.",
+    "inter_multi_device": "Работать под своим кодом с одного телефона.",
+    "external": "Группа мониторинга забраковала интервью по аудиозаписи — разобрать эти записи вместе.",
+}
+
+
+def _new_doc():
+    doc = Document()
+    sec = doc.sections[0]
+    sec.left_margin = sec.right_margin = Cm(2)
+    sec.top_margin = sec.bottom_margin = Cm(1.6)
+    zoom = doc.settings.element.find(qn("w:zoom"))
+    if zoom is not None:
+        zoom.set(qn("w:percent"), "100")
+    st = doc.styles["Normal"]
+    st.font.name = "Calibri"
+    st.element.rPr.rFonts.set(qn("w:eastAsia"), "Calibri")
+    st.font.size = Pt(10.5)
+    return doc
+
+
+def cards(result, cfg, decisions_by_pos, project, inter=None):
+    """Карточка на каждого интервьюера (или на одного): статус, цифры,
+    причины брака с советом, работа по дням, необычные ответы, анкеты."""
+    from . import daily
+    df = frame(result, decisions_by_pos)
+    iv_all = df[df["state"] != "tech"]
+    inters = [inter] if inter else sorted(iv_all["inter"].dropna().unique(), key=str)
+    d_rows, d_days, _, norm = daily.table(result, cfg, decisions_by_pos)
+    d_by = {r["inter"]: r for r in d_rows}
+    pats = {p["inter"]: p for p in result.get("answer_patterns") or []}
+    doc = _new_doc()
+    first = True
+    for name in inters:
+        g = iv_all[iv_all["inter"] == name]
+        if g.empty:
+            continue
+        if not first:
+            doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+        first = False
+        n = len(g)
+        b = int((g["state"] == "brak").sum())
+        w = int((g["state"] == "warn").sum())
+        pct = b / n * 100 if n else 0
+        lvl = level(pct, cfg)
+        para(doc, f"КАРТОЧКА ИНТЕРВЬЮЕРА · {project}", 9, GREY, bold=True, space_after=2)
+        para(doc, str(name), 22, NAVY, bold=True, space_after=2)
+        para(doc, f"{g['city'].mode().iloc[0] if len(g['city'].dropna()) else '—'} · {engine.data_period(g) or ''}", 10, GREY)
+        para(doc, f"{STATUS_TEXT[lvl]} — брак {pct:.0f}%", 14, bold=True, space_after=4)
+        para(doc, engine.STATUS_LEVELS[lvl]["actions"].capitalize() + ".", 10, GREY)
+        dr = d_by.get(name)
+        add_table(doc, ["Анкет", "Брак", "Проверить", "Норма", "Дней работал", "В среднем в день"],
+                  [[n, b, w, n - b - w, dr["days_worked"] if dr else "—", dr["avg"] if dr else "—"]],
+                  align_right=(0, 1, 2, 3, 4, 5), font_size=10)
+        reasons = reason_counts(g)
+        if reasons:
+            para(doc, "Почему брак и что исправить", 12, NAVY, bold=True, space_after=2)
+            add_table(doc, ["Причина", "Анкет", "Что исправить"],
+                      [[engine.short_label(c), k, ADVICE.get(c, "Разобрать эти анкеты с супервайзером.")]
+                       for c, k in reasons[:8]], widths=[4.5, 1.5, 11], align_right=(1,), font_size=9)
+        warn = Counter(c for xs in g.loc[g["state"] == "warn", "issues"] for c in {c for c, s, _ in xs if s == engine.WARNING})
+        if warn:
+            para(doc, "Обратить внимание (не брак, но проверить)", 11, NAVY, bold=True, space_after=2)
+            for c, k in warn.most_common(5):
+                bullet(doc, f" — {k} анк. {ADVICE.get(c, '')}", engine.short_label(c))
+        if dr and d_days:
+            para(doc, "Работа по дням" + (f" (норма {norm} засчитанных)" if norm else ""), 11, NAVY, bold=True, space_after=2)
+            add_table(doc, ["День", "Засчитано", "Брак", "Итог"],
+                      [[pd.Timestamp(d).strftime("%d.%m"), c["ok"] if c["n"] else "—", c["brak"] or "—",
+                        "не работал" if not c["n"] else ("ниже нормы" if c["status"] == "YELLOW" else "норма")]
+                       for d, c in zip(d_days, dr["cells"])], align_right=(1, 2), font_size=9)
+        if name in pats:
+            para(doc, "Необычные ответы его респондентов", 11, NAVY, bold=True, space_after=2)
+            for t in pats[name]["notes"]:
+                bullet(doc, " " + t)
+        worst = g[g["state"] == "brak"].sort_values("risk", ascending=False).head(10)
+        if len(worst):
+            para(doc, "Анкеты для разбора", 11, NAVY, bold=True, space_after=2)
+            add_table(doc, ["ID", "Когда", "Почему"],
+                      [[x.row_id, "" if pd.isna(x.start) else x.start.strftime("%d.%m %H:%M"),
+                        "; ".join(t for c, s, t in x.issues if s == engine.DEFECT)[:220]] for x in worst.itertuples()],
+                      widths=[2, 2.2, 12.8], font_size=8.5)
+        para(doc, "Подпись интервьюера: ____________    Супервайзер: ____________    Дата: ________", 10, space_after=0)
+    if first:
+        para(doc, "Нет анкет для карточек.")
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()

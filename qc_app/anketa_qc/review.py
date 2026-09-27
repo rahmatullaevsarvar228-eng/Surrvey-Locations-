@@ -75,6 +75,12 @@ EXPLAIN = {
     "external": ((), "Анкету уже забраковала группа мониторинга (например, по аудиозаписи) — в колонке отметки стоит «1». "
                      "Такая анкета не перепроверяется системой и сразу считается браком: в норму, квоты и чистую базу "
                      "не идёт, решения руководителя не требует."),
+    "near_dup": ((), "Ответы этой анкеты почти полностью совпадают с другой анкетой ({near_dup_pct}%+ одинаковых "
+                     "ответов). У двух разных людей так почти не бывает — вероятно, анкету скопировали или заполнили "
+                     "по образцу. Метод «percent match» (Pew Research, Всемирный банк)."),
+    "block_fast": ((), "По отметкам времени внутри анкеты блок пройден в несколько раз быстрее, чем обычно у всех "
+                       "(меньше {block_fast_pct}% обычного времени). Так бывает, когда вопросы не зачитывают, а "
+                       "отмечают ответы сами."),
     "grid_same": ((), "Во всех вопросах блока-сетки выбран один и тот же вариант. Похоже, интервьюер "
                       "«прощёлкал» блок, не зачитывая вопросы."),
 }
@@ -82,7 +88,7 @@ EXPLAIN = {
 
 def _params(cfg):
     p = {}
-    for key in ("thresholds", "night", "geo", "probing"):
+    for key in ("thresholds", "night", "geo", "probing", "quality"):
         p.update({k: v for k, v in (cfg.get(key) or {}).items() if not isinstance(v, (dict, list))})
     return p
 
@@ -195,3 +201,61 @@ def technical_rows(result):
     df, raw = result["df"], result["raw"]
     pos = sorted(df.loc[df["technical"], "pos"])
     return raw.loc[pos].copy()
+
+
+def _stable_rank(value):
+    """Постоянное «случайное» число для анкеты — выборка не меняется при
+    обновлении данных (иначе группа мониторинга получала бы новый список)."""
+    import hashlib
+    return int(hashlib.md5(str(value).encode("utf-8")).hexdigest()[:8], 16)
+
+
+def listen_sample(result, cfg, decisions_by_pos):
+    """Выборка на прослушку аудио для группы мониторинга (как CARI в
+    международной практике): все подозрительные анкеты без решения +
+    случайная доля остальных у каждого интервьюера; у новых интервьюеров и
+    у тех, кто в красной/жёлтой зоне, доля больше. Минимум одна анкета на
+    интервьюера. Возвращает {pos: почему в выборке}."""
+    df = result["df"]
+    lc = cfg.get("listen") or {}
+    base, new, risk = (float(lc.get(k, d)) for k, d in (("base_pct", 5), ("new_pct", 15), ("risk_pct", 20)))
+    st = cfg["status"]
+    iv = df[~df["technical"] & ~df["rejected"]].copy()
+    iv["decision"] = iv["pos"].map(lambda p: (decisions_by_pos.get(p) or {}).get("decision"))
+    iv["state"] = [final_state(False, d, w, x) for d, w, x in zip(iv["is_defect"], iv["is_warning"], iv["decision"])]
+    last_day = iv["start"].max()
+    out = {}
+    for inter, g in iv.groupby(iv["inter"].fillna("—")):
+        pct_brak = (g["state"] == "brak").mean() * 100
+        first = g["start"].min()
+        is_new = pd.notna(first) and pd.notna(last_day) and (last_day - first) <= pd.Timedelta(days=2)
+        share, why = base, f"случайная выборка {base:g}%"
+        if pct_brak >= st["yellow_pct"]:
+            share, why = risk, f"интервьюер в зоне риска — выборка {risk:g}%"
+        elif is_new:
+            share, why = new, f"новый интервьюер — выборка {new:g}%"
+        for x in g.itertuples():
+            if not x.decision and (x.is_defect or x.is_warning):
+                out[x.pos] = "подозрительная анкета — подтвердить по записи"
+        rest = g[~g["pos"].isin(list(out)) & g["decision"].isna()]
+        rest = rest.assign(_r=rest["row_id"].map(_stable_rank)).sort_values("_r")
+        k = max(1, int(round(len(rest) * share / 100))) if len(rest) else 0
+        for p in rest["pos"].head(k):
+            out[p] = why
+    return out
+
+
+def listen_rows(result, cfg, decisions_by_pos):
+    """Таблица для группы мониторинга: что прослушать и куда поставить «1»."""
+    df = result["df"].set_index("pos")
+    rows = []
+    for pos, why in sorted(listen_sample(result, cfg, decisions_by_pos).items(),
+                           key=lambda kv: (str(df.at[kv[0], "inter"]), str(df.at[kv[0], "start"]))):
+        x = df.loc[pos]
+        rows.append({"ID анкеты": x["row_id"], "Интервьюер": x["inter"], "Город": x["city"],
+                     "Дата и время": "" if pd.isna(x["start"]) else x["start"].strftime("%d.%m.%Y %H:%M"),
+                     "Длительность, мин": None if pd.isna(x["duration_min"]) else round(float(x["duration_min"]), 1),
+                     "Почему в выборке": why,
+                     "Что нашла система": x["reason_text"] or x["warning_text"] or "",
+                     "Брак по записи (поставьте 1)": "", "Комментарий": ""})
+    return rows

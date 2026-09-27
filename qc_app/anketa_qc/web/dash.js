@@ -409,6 +409,10 @@ function pageDefects(root) {
     card("На карте", "Каждая точка — анкета. Нажмите на точку, чтобы увидеть, почему она отмечена.", miniMap(sel, color)),
     card("Когда: час начала анкеты", "По местному времени выгрузки.", hourBars(byHour, color))));
 
+  const bt = S.result.block_times || [];
+  root.append(card("Время по блокам анкеты", bt.length ? "Сколько обычно занимает каждый блок (медиана по завершённым интервью). Блок, пройденный намного быстрее обычного, отмечается «Блок пройден слишком быстро»."
+    : "Чтобы видеть время каждого блока, добавьте в форму Kobo в начало каждого блока поле типа calculate с формулой now() (например time_block2, time_block3). Программа найдёт эти поля сама.",
+    bt.length ? hbars(bt.filter((b) => b.median_sec != null).map((b) => ({ label: b.block, value: b.median_sec / 60 })), { fmtVal: (it) => `${fmt(it.value, 1)} мин` }) : null));
   root.append(card("Анкеты", "Паспорт каждой анкеты: что, кто, где, когда и в каком блоке. Нажмите на строку — подробности и исходная строка из таблицы.",
     passportTable(sel, sev, reason)));
 }
@@ -476,6 +480,14 @@ function pageInterviewers(root) {
       { key: "Риск", label: "Риск", num: true, render: (r) => riskTag(r["Риск"]) },
       { key: "Главные причины", label: "Главные причины брака", wrap: true },
     ], rows, { sortKey: "% брака", rowClass: (r) => `row-${r["Статус"]}`, onClick: (r) => showInterviewer(r["Интервьюер"]) })));
+  const pats = (S.result.answer_patterns || []).filter((p) => rows.some((r) => r["Интервьюер"] === p.inter));
+  root.append(card("Необычные ответы респондентов", "Сравнение с коллегами: у кого ответы заметно отличаются от остальных, слишком одинаковые или много «не знаю». Это сигнал проверить (прозвон, прослушка), а не брак сам по себе.",
+    pats.length ? h("div", { class: "risk-list" }, pats.map((p) => h("div", { class: "pat-row clickable", onclick: () => showInterviewer(p.inter) },
+      h("div", {}, h("b", {}, p.inter), h("span", { class: "muted small" }, ` · ${p.city} · ${p.n} анкет`)),
+      h("ul", { class: "pat-notes" }, p.notes.slice(0, 3).map((t) => h("li", {}, t))))))
+      : h("div", { class: "notice ok" }, S.result.quality_cols ? "Ответы респондентов у всех интервьюеров похожи на остальных." : "Для сравнения нужно больше вопросов в анкете.")));
+  root.append(h("div", { class: "row", style: "justify-content:flex-end;margin:-6px 0 16px" },
+    h("button", { class: "btn", onclick: () => exportReport("cards", F().inter ? { inter: F().inter } : {}) }, "Карточки интервьюеров (Word)")));
   root.append(h("div", { class: "card" }, h("h2", {}, "Что делать по статусу"),
     h("ul", { class: "issue-list" }, S.result.legend.map((l) => h("li", {}, h("span", { style: "min-width:110px" }, pill(l.code)), h("b", { style: "min-width:170px" }, l.desc), h("span", { class: "muted" }, l.actions))))));
 }
@@ -492,8 +504,12 @@ function showInterviewer(inter) {
     h("div", { class: "grid-2" },
       card("Почему брак", null, hbars(reasonCounts(all.filter(isBrak), "defect").map(([code, n]) => ({ label: label(code), value: n })), { color: "c-brak", empty: "Брака нет" })),
       card("По дням", null, legend([["c-brak", "Брак"], ["c-warn", "Проверить"], ["c-ok", "Норма"]]), dayColumns(all))),
+    ((S.result.answer_patterns || []).find((p) => p.inter === inter) || null) ? card("Необычные ответы его респондентов", "По сравнению с остальными интервьюерами.",
+      h("ul", { class: "pat-notes" }, S.result.answer_patterns.find((p) => p.inter === inter).notes.map((t) => h("li", {}, t)))) : null,
     all.some((a) => a.lat != null) ? card("Маршрут", "Анкеты по времени; линия — порядок в течение дня.", miniMap(all, null, true)) : null,
     card("Анкеты", null, passportTable(all.filter((a) => a.defect || a.warning || a.decision), "defect")));
+  body.prepend(h("div", { class: "row", style: "justify-content:flex-end;margin-bottom:10px" },
+    h("button", { class: "btn", onclick: () => exportReport("cards", { inter }) }, "Карточка интервьюера (Word)")));
   openModal(`Интервьюер ${inter}`, body, true);
 }
 

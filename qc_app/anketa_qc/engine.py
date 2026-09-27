@@ -50,6 +50,8 @@ ISSUE_LABELS = {
     "mass_open": "Массовое открытие анкет за короткое время",
     "block_empty": "Обязательный блок не заполнен",
     "external": "Брак, отмеченный вручную (аудиоконтроль / мониторинг)",
+    "near_dup": "Почти копия другой анкеты (совпадает большинство ответов)",
+    "block_fast": "Блок анкеты пройден намного быстрее обычного",
     "grid_same": "Во всём блоке-сетке один и тот же ответ",
 }
 
@@ -72,6 +74,8 @@ SHORT_LABELS = {
     "probe_low_avg": "Слабый зондаж у интервьюера",
     "block_empty": "Пустой обязательный блок",
     "external": "Брак по аудиоконтролю",
+    "near_dup": "Почти копия другой анкеты",
+    "block_fast": "Блок пройден слишком быстро",
     "grid_same": "Одинаковые ответы в сетке",
     "no_gps": "Нет GPS",
     "geo_far": "Далеко от точки опроса",
@@ -105,7 +109,7 @@ STATUS_LEVELS = {
 # слабых сигналов складываются, один сильный уже даёт высокий балл.
 RISK_WEIGHTS = {
     "external": 1.0, "conveyor": 0.7, "geo_same": 0.7, "geo_city": 0.7, "overlap": 0.6, "mass_open": 0.6,
-    "block_empty": 0.5, "grid_same": 0.3, "geo_jump": 0.6, "dup_phone": 0.6,
+    "block_empty": 0.5, "grid_same": 0.3, "near_dup": 0.6, "block_fast": 0.35, "geo_jump": 0.6, "dup_phone": 0.6,
     "no_device": 0.5, "too_short": 0.5, "start_gap": 0.4, "geo_far": 0.4, "no_rest": 0.35,
     "night": 0.3, "dup_name": 0.3, "probe_low_avg": 0.3, "geo_cluster": 0.3,
     "too_long": 0.2, "probe_depth": 0.2, "device_multi_inter": 0.2, "no_gps": 0.15, "inter_multi_device": 0.1,
@@ -652,6 +656,29 @@ def run(raw_input, cfg):
                 lambda i, n=sec["name"], cols=cols: f"блок «{n}»: во всех {int(n_filled[i])} вопросах один ответ "
                                                     f"«{next(clean_str(raw_sorted.at[i, c]) for c in cols if clean_str(raw_sorted.at[i, c]))}»")
 
+    # --- Международные методы: копии анкет, время по блокам -----------------
+    from . import quality
+    qc = cfg.get("quality") or {}
+    qcols = quality.answer_columns(raw_sorted, df, cfg)
+    if qc.get("near_dup", True):
+        dup = quality.near_duplicates(df, raw_sorted, qcols, qc.get("near_dup_pct", 85) / 100,
+                                      int(qc.get("near_dup_min_q", 15)))
+
+        def dup_text(i):
+            r, j, n = dup[i]
+            when = f", {df.at[j, 'start']:%d.%m %H:%M}" if pd.notna(df.at[j, "start"]) else ""
+            return (f"совпадает {r * 100:.0f}% ответов ({n} вопросов) с анкетой {df.at[j, 'row_id']} "
+                    f"(интервьюер {df.at[j, 'inter'] or '—'}{when})")
+        strong = qc.get("near_dup_defect_pct", 95) / 100      # почти полная копия — брак
+        add(df.index.isin([i for i, v in dup.items() if v[0] >= strong]), "near_dup", DEFECT, dup_text)
+        add(df.index.isin([i for i, v in dup.items() if v[0] < strong]), "near_dup", qc.get("near_dup_severity", WARNING),
+            dup_text)
+
+    fast, block_summary = quality.block_times(df, raw_sorted, cfg, qc.get("block_fast_pct", 25))
+    add(df.index.isin(list(fast)), "block_fast", qc.get("block_severity", WARNING),
+        lambda i: "; ".join(f"«{b}» за {quality.fmt_sec(sec)} (обычно {quality.fmt_sec(med)})" for b, sec, med in fast[i]))
+    patterns = quality.answer_patterns(df, raw_sorted, qcols, answer_filter) if qc.get("patterns", True) else []
+
     # --- Брак, отмеченный вручную (мониторинг) --------------------------------
     rej = prepared_rej_info
     if rej:
@@ -672,7 +699,7 @@ def run(raw_input, cfg):
 
     city_issues = check_cities(df, cfg)
     repetition, answers = analyze_answers(df, raw, cfg, answer_filter, blocks)
-    interviewers = summarize_interviewers(df, cfg, repetition)
+    interviewers = summarize_interviewers(df, cfg, repetition, patterns)
 
     return {
         "df": df,
@@ -685,6 +712,9 @@ def run(raw_input, cfg):
         "sections": [{"name": s["name"], "n": len(s["columns"]), "auto": bool(s.get("auto"))} for s in sections],
         "technical_info": tech_info_of(df),
         "rejected_info": prepared_rej_info,
+        "answer_patterns": patterns,
+        "block_times": block_summary,
+        "quality_cols": len(qcols),
         "interviewers": interviewers,
         "repetition": repetition,
         "geo": geo_result,
@@ -803,9 +833,10 @@ def analyze_answers(df, raw, cfg, answer_filter, blocks):
     return repetition, {"all": all_rows, "index": dict(index)}
 
 
-def summarize_interviewers(df, cfg, repetition):
+def summarize_interviewers(df, cfg, repetition, patterns=()):
     red, yellow = cfg["status"]["red_pct"], cfg["status"]["yellow_pct"]
     rep_by_inter = {r["Интервьюер"]: r for r in repetition.get("rows", [])}
+    pat_by_inter = {p["inter"]: p for p in patterns or []}
     rows = []
     for inter, g_all in df.groupby(df["inter"].fillna("—")):
         g = g_all[~g_all["technical"]]         # доля брака — среди интервью
@@ -831,6 +862,7 @@ def summarize_interviewers(df, cfg, repetition):
             "Повтор значения": f"{rep['Самое частое значение']} — {rep['% повтора']}%" if rep else "",
             "Повтор: статус": rep["Статус"] if rep else "",
             "Главные причины брака": top,
+            "Необычные ответы": "; ".join(pat_by_inter[inter]["notes"][:2]) if inter in pat_by_inter else "",
         })
     rows.sort(key=lambda r: (-r["% брака"], str(r["Интервьюер"])))
     return rows

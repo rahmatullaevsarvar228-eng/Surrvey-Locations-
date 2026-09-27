@@ -540,3 +540,35 @@ def test_technical_tasks_on_separate_sheet(tmp_path):
     # в окне анкеты видно, что перед ней было ТЗ
     d = client.get(f"/api/anketa/{second['pos']}").get_json()
     assert d["previous"]["technical"] and d["previous"]["kind"] == "техническое задание"
+
+
+def test_listen_sample_and_interviewer_cards(tmp_path, demo_bytes):
+    data = pd.read_excel(io.BytesIO(demo_bytes), sheet_name="data")
+    FakeClient.frames = {"Т1": data}
+    FakeClient.saved = {}
+    client = create_app(tmp_path, client_factory=FakeClient).test_client()
+    login(client, "boss")
+    client.post("/api/source/remote", json={"ids": ["Т1"]})
+    r = client.post("/api/run", json={}).get_json()
+    listen = [a for a in r["anketas"] if a["listen"]]
+    inters = {a["inter"] for a in r["anketas"] if not a["technical"] and not a["rejected"]}
+    assert {a["inter"] for a in listen} == inters                 # у каждого интервьюера хотя бы одна
+    assert not any(a["technical"] or a["rejected"] for a in listen)
+    assert all(a["listen"] for a in listen if a["warning"] and not a["defect"])
+    # выборка постоянная — не меняется при повторной проверке
+    r2 = client.post("/api/run", json={}).get_json()
+    assert {a["id"] for a in r2["anketas"] if a["listen"]} == {a["id"] for a in listen}
+    wb = openpyxl.load_workbook(io.BytesIO(client.get("/api/export/listen").data))
+    head = [c.value for c in wb.active[1]]
+    assert "Брак по записи (поставьте 1)" in head and wb.active.max_row == len(listen) + 1
+    # копии анкет и необычные ответы из демо
+    assert any(i[0] == "near_dup" for a in r["anketas"] if a["inter"] == "Inter 14" for i in a["issues"])
+    assert [p["inter"] for p in r["answer_patterns"]] == ["Inter 05"]
+    # карточки интервьюеров
+    from docx import Document
+    doc = Document(io.BytesIO(client.get("/api/export/cards?inter=Inter 03").data))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Inter 03" in text and "КАРТОЧКА ИНТЕРВЬЮЕРА" in text
+    assert any("Что исправить" in c.text for t in doc.tables for c in t.rows[0].cells)
+    doc = Document(io.BytesIO(client.get("/api/export/cards").data))
+    assert sum("КАРТОЧКА ИНТЕРВЬЮЕРА" in p.text for p in doc.paragraphs) == len(inters)

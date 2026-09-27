@@ -33,6 +33,8 @@ CODE_AREA = {
     "no_gps": GPS, "geo_far": GPS, "geo_cluster": GPS, "geo_same": GPS, "geo_jump": GPS, "geo_city": GPS,
     "probe_low_avg": OPEN,
     "external": "Аудиоконтроль / мониторинг",
+    "near_dup": "Ответы анкеты (сравнение с другими)",
+    "block_fast": TIME,
 }
 
 

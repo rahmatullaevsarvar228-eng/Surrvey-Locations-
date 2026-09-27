@@ -41,6 +41,7 @@ def main(out):
             day = pd.Timestamp("2025-09-15 09:00")
             t = day + pd.Timedelta(minutes=random.randint(0, 40))
             day_start = None
+            last_grid, last_answers = None, {}
             for k in range(random.randint(18, 34)):
                 technical = k in (2, 13)            # видео по заданию: рядом нет рекламы
                 if technical:
@@ -89,13 +90,32 @@ def main(out):
                     "end": end.strftime("%Y-%m-%dT%H:%M:%S.000+05:00"),
                     "deviceid": device, "Город": city, "Код интервьюера": code,
                     "Тип записи": "Техническое задание (видео)" if technical else "Интервью",
-                    "Пол респондента": random.choice(["Мужской", "Женский"]),
+                    "Пол респондента": "Женский" if inter_no == 5 else random.choice(["Мужской", "Женский"]),
                     "Сколько вам полных лет?": age,
                     "1. Название какого банка первым приходит Вам на ум?": tom[0],
                 }
                 for j in range(2, 8):
                     row[f"2.{j}. А ещё какой банк?"] = tom[j - 1]
                 row["Доход (1-3)"] = income
+                # сетка оценок 1–5 (20 вопросов) и отметки времени начала блоков
+                if not technical:
+                    if inter_no == 14 and k >= 3 and last_grid and k % 3 == 0:   # копирует свою прошлую анкету целиком
+                        grid = list(last_grid)
+                        grid[random.randrange(20)] = random.randint(1, 5)
+                        for key in list(last_answers):
+                            row[key] = last_answers[key]
+                    elif inter_no == 5:                                # «придумывает»: почти всё «5»
+                        grid = [5 if random.random() < 0.85 else random.randint(3, 4) for _ in range(20)]
+                    else:
+                        grid = [random.choice([1, 2, 3, 3, 4, 4, 4, 5, 5]) for _ in range(20)]
+                    last_grid = grid
+                    last_answers = {c: row[c] for c in row if c.startswith(("1.", "2.")) or c in ("Пол респондента", "Сколько вам полных лет?", "Доход (1-3)")}
+                    for j, v in enumerate(grid, 1):
+                        row[f"11.{j}. Оцените банк по пункту {j}"] = v
+                    t_b2 = start + (end - start) * 0.3
+                    t_b3 = start + (end - start) * (0.35 if inter_no == 9 and k % 2 else 0.8)   # Inter 09 «пролетает» сетку
+                    row["time_block2"] = t_b2.strftime("%Y-%m-%dT%H:%M:%S.000+05:00")
+                    row["time_block3"] = t_b3.strftime("%Y-%m-%dT%H:%M:%S.000+05:00")
                 row["Скажите пожалуйста как вас зовут?"] = name
                 row["Номер телефона респондента"] = phone if phone and random.random() > 0.05 else None
                 if inter_no == 8:                     # сидит дома: одна и та же точка
