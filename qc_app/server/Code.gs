@@ -5,8 +5,12 @@
  * администратор. Администратор создаёт логины и указывает команду каждого
  * сотрудника. Команды сами подключают свои Google-таблицы с анкетами
  * (источники) к своим проектам — другие команды их не видят. Таблицы
- * остаются закрытыми: команда даёт доступ «Читатель» аккаунту сервера, и
- * скрипт читает анкеты от его имени.
+ * остаются закрытыми. Подключить таблицу можно двумя способами:
+ *  • через свой Google-аккаунт: руководитель один раз ставит себе личный
+ *    коннектор (server/Connector.gs), и сервер читает таблицы через него —
+ *    ничего никому расшаривать не нужно;
+ *  • через аккаунт сервера: команда даёт доступ «Читатель» адресу сервера
+ *    (или в таблице стоит «Все, у кого есть ссылка»).
  *
  * Установка — см. README («Сервер доступа»): вставить этот код в
  * Расширения → Apps Script, один раз запустить setup(), развернуть как
@@ -17,7 +21,10 @@ var SHEET_USERS = 'Пользователи';
 var SHEET_SOURCES = 'Источники';
 var SHEET_LOG = 'Журнал';
 var USERS_HEADER = ['login', 'name', 'team', 'role', 'active', 'salt', 'hash', 'created', 'last_login'];
-var SOURCES_HEADER = ['id', 'team', 'project', 'name', 'url', 'sheet', 'added_by', 'created'];
+// via — чей личный коннектор читает таблицу (логин); пусто — аккаунт сервера
+var SOURCES_HEADER = ['id', 'team', 'project', 'name', 'url', 'sheet', 'added_by', 'created', 'via'];
+var SHEET_BRIDGES = 'Коннекторы';
+var BRIDGES_HEADER = ['login', 'url', 'key', 'email', 'created'];
 var LOG_HEADER = ['time', 'login', 'action', 'detail'];
 var DECISIONS_SHEET = 'Решения ОТК';
 var DECISIONS_HEADER = ['ID анкеты', 'Решение', 'Причина (система)', 'Комментарий', 'Кто решил', 'Когда'];
@@ -57,7 +64,8 @@ function handle_(req) {
 
   var me = auth_(req.token);
   switch (action) {
-    case 'me': return { user: publicUser_(me), server_email: serverEmail_() };
+    case 'me': return { user: publicUser_(me), server_email: serverEmail_(), bridge: publicBridge_(me) };
+    case 'set_bridge': return withLock_(function () { return setBridge_(me, req); });
     case 'sources': return { sources: userSources_(me) };
     case 'add_source': return withLock_(function () { return addSource_(me, req); });
     case 'delete_source': return withLock_(function () { return deleteSource_(me, req.id); });
@@ -99,7 +107,8 @@ function login_(login, password) {
   cache.remove(failKey);
   setCell_(SHEET_USERS, USERS_HEADER, user._row, 'last_login', now_());
   log_(login, 'login', '');
-  return { token: makeToken_(login), user: publicUser_(user), sources: userSources_(user), server_email: serverEmail_() };
+  return { token: makeToken_(login), user: publicUser_(user), sources: userSources_(user), server_email: serverEmail_(),
+           bridge: publicBridge_(user) };
 }
 
 function makeToken_(login) {
@@ -251,18 +260,26 @@ function addSource_(me, req) {
   if (!name) throw new Error('Введите название источника');
   var team = me.role === 'admin' && req.team ? String(req.team).trim() : String(me.team || '').trim();
   if (!team) throw new Error('Вам не назначена команда — обратитесь к администратору');
-  var ss;
-  try {
-    ss = SpreadsheetApp.openByUrl(url);
-  } catch (err) {
-    throw new Error('Сервер не видит эту таблицу. В Google Sheets нажмите «Настройки доступа» и добавьте ' +
-                    serverEmail_() + ' как «Читатель».');
-  }
   var sheetName = String(req.sheet || '').trim();
-  if (sheetName && !ss.getSheetByName(sheetName)) throw new Error('В таблице нет листа «' + sheetName + '»');
+  var via = '';
+  if (req.via === 'bridge') {
+    var b = findBridge_(me.login);
+    if (!b) throw new Error('Сначала подключите свой Google-аккаунт (личный коннектор)');
+    callBridge_(b, { action: 'check', url: url, sheet: sheetName, label: name });
+    via = me.login;
+  } else {
+    var ss;
+    try {
+      ss = SpreadsheetApp.openByUrl(url);
+    } catch (err) {
+      throw new Error('Сервер не видит эту таблицу. Подключите её через свой Google-аккаунт или в Google Sheets ' +
+                      'нажмите «Настройки доступа» и добавьте ' + serverEmail_() + ' как «Читатель».');
+    }
+    if (sheetName && !ss.getSheetByName(sheetName)) throw new Error('В таблице нет листа «' + sheetName + '»');
+  }
   var src = {
     id: 's' + Utilities.getUuid().slice(0, 8), team: team, project: String(req.project || '').trim(),
-    name: name, url: url, sheet: sheetName, added_by: me.login, created: now_(),
+    name: name, url: url, sheet: sheetName, added_by: me.login, created: now_(), via: via,
   };
   writeRow_(SHEET_SOURCES, SOURCES_HEADER, src);
   log_(me.login, 'add_source', team + ' / ' + name);
@@ -286,6 +303,7 @@ function publicSource_(s) {
   return {
     id: String(s.id), team: String(s.team || ''), project: String(s.project || ''), name: String(s.name),
     url: String(s.url), sheet: String(s.sheet || ''), added_by: String(s.added_by || ''), created: String(s.created || ''),
+    via: String(s.via || ''),
   };
 }
 
@@ -301,26 +319,121 @@ function serverEmail_() {
   try { return Session.getEffectiveUser().getEmail(); } catch (err) { return ''; }
 }
 
-function fetchSource_(me, sourceId, sheetOverride) {
-  var src = null;
+function findSource_(me, sourceId) {
   var all = readRows_(SHEET_SOURCES, SOURCES_HEADER);
-  for (var i = 0; i < all.length; i++) if (String(all[i].id) === String(sourceId)) src = all[i];
-  if (!src) throw new Error('Источник не найден');
-  if (!canUse_(me, src)) throw new Error('Нет доступа к источнику «' + src.name + '»');
-  var ss;
-  try {
-    ss = SpreadsheetApp.openByUrl(src.url);
-  } catch (err) {
-    throw new Error('Сервер потерял доступ к таблице «' + src.name + '». Снова добавьте ' + serverEmail_() +
-                    ' как «Читатель».');
+  for (var i = 0; i < all.length; i++) {
+    if (String(all[i].id) !== String(sourceId)) continue;
+    if (!canUse_(me, all[i])) throw new Error('Нет доступа к источнику «' + all[i].name + '»');
+    return all[i];
   }
+  throw new Error('Источник не найден');
+}
+
+/** Коннектор, через который читается источник (или null — аккаунт сервера). */
+function sourceBridge_(src) {
+  if (!String(src.via || '')) return null;
+  var b = findBridge_(src.via);
+  if (!b) throw new Error('Таблица «' + src.name + '» подключена через Google-аккаунт ' + src.via +
+                          ', но его коннектор отключён. Подключите коннектор снова или переподключите таблицу.');
+  return b;
+}
+
+function fetchSource_(me, sourceId, sheetOverride) {
+  var src = findSource_(me, sourceId);
   // Лист можно выбрать в программе (в таблице их бывает много); иначе —
   // указанный при подключении или первый.
+  var want = String(sheetOverride || src.sheet || '').trim();
+  var bridge = sourceBridge_(src);
+  var book;
+  if (bridge) {
+    book = callBridge_(bridge, { action: 'read', url: src.url, sheet: want, label: src.name });
+  } else {
+    var ss;
+    try {
+      ss = SpreadsheetApp.openByUrl(src.url);
+    } catch (err) {
+      throw new Error('Сервер потерял доступ к таблице «' + src.name + '». Снова добавьте ' + serverEmail_() +
+                      ' как «Читатель» или подключите таблицу через свой Google-аккаунт.');
+    }
+    book = readBook_(ss, want, src.name);
+  }
+  log_(me.login, 'fetch', src.name + ' (' + book.rows.length + ' строк)');
+  return { id: String(src.id), name: String(src.name), columns: book.columns, rows: book.rows,
+           decisions: book.decisions, sheets: book.sheets, sheet: book.sheet };
+}
+
+// ── Личный коннектор руководителя (server/Connector.gs) ───────────────────
+/** Руководитель ставит коннектор в своём Google-аккаунте и один раз
+ *  вставляет в программу его ссылку и ключ. Сервер читает таблицы через
+ *  коннектор — доступ к ним есть у самого руководителя, расшаривать ничего
+ *  не нужно. */
+function findBridge_(login) {
+  login = normLogin_(login);
+  var rows = readRows_(SHEET_BRIDGES, BRIDGES_HEADER);
+  for (var i = 0; i < rows.length; i++) if (normLogin_(rows[i].login) === login) return rows[i];
+  return null;
+}
+
+function publicBridge_(user) {
+  var b = findBridge_(user.login);
+  return b ? { email: String(b.email || ''), url: String(b.url), created: String(b.created || '') } : null;
+}
+
+function callBridge_(bridge, body) {
+  body.key = String(bridge.key);
+  var resp;
+  try {
+    resp = UrlFetchApp.fetch(String(bridge.url), {
+      method: 'post', contentType: 'application/json', payload: JSON.stringify(body),
+      muteHttpExceptions: true, followRedirects: true,
+    });
+  } catch (err) {
+    throw new Error('Нет связи с коннектором: ' + ((err && err.message) || err));
+  }
+  var data;
+  try {
+    data = JSON.parse(resp.getContentText());
+  } catch (err) {
+    throw new Error('Коннектор ответил не то, что ожидалось. Проверьте ссылку (…/exec) и что при развёртывании ' +
+                    'выбрано «Выполнять от имени: Я», «У кого есть доступ: Все».');
+  }
+  if (data && data.error) throw new Error(String(data.error));
+  return data;
+}
+
+function setBridge_(me, req) {
+  var url = String(req.url || '').trim();
+  var key = String(req.key || '').trim();
+  var old = findBridge_(me.login);
+  if (!url) {
+    if (old) sheet_(SHEET_BRIDGES, BRIDGES_HEADER).deleteRow(old._row);
+    log_(me.login, 'set_bridge', 'отключён');
+    return { bridge: null };
+  }
+  if (!/^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[A-Za-z0-9_-]+\/exec/.test(url)) {
+    throw new Error('Нужна ссылка веб-приложения коннектора вида https://script.google.com/macros/s/…/exec');
+  }
+  if (!key) throw new Error('Введите ключ коннектора (он в журнале выполнения после запуска setup)');
+  var info = callBridge_({ url: url, key: key }, { action: 'ping' });
+  var row = { login: me.login, url: url, key: key, email: String(info.email || ''), created: now_() };
+  if (old) {
+    BRIDGES_HEADER.forEach(function (k) { setCell_(SHEET_BRIDGES, BRIDGES_HEADER, old._row, k, row[k]); });
+  } else {
+    writeRow_(SHEET_BRIDGES, BRIDGES_HEADER, row);
+  }
+  log_(me.login, 'set_bridge', row.email);
+  return { bridge: publicBridge_(me) };
+}
+
+// ── Чтение таблицы и решения ОТК ──────────────────────────────────────────
+// readBook_, readDecisions_, writeDecisions_ и now_ одинаковы здесь и в
+// server/Connector.gs (тест сверяет): коннектор делает то же самое, только
+// от имени руководителя.
+function readBook_(ss, want, label) {
   var tabs = ss.getSheets().map(function (x) { return x.getName(); })
     .filter(function (n) { return n !== DECISIONS_SHEET; });
-  var want = String(sheetOverride || src.sheet || '').trim();
   var sh = want ? ss.getSheetByName(want) : ss.getSheets()[0];
-  if (!sh) throw new Error('В источнике «' + src.name + '» нет листа «' + want + '»');
+  if (!sh) throw new Error('В источнике «' + label + '» нет листа «' + want + '»');
   var tz = ss.getSpreadsheetTimeZone();
   var values = sh.getDataRange().getValues();
   // Даты — строкой в часовом поясе таблицы (местное время), а не в UTC:
@@ -332,9 +445,8 @@ function fetchSource_(me, sourceId, sheetOverride) {
     }
   }
   while (values.length > 1 && values[values.length - 1].join('') === '') values.pop();
-  log_(me.login, 'fetch', src.name + ' (' + Math.max(values.length - 1, 0) + ' строк)');
-  return { id: String(src.id), name: String(src.name), columns: values[0] || [], rows: values.slice(1),
-           decisions: readDecisions_(ss, tz), sheets: tabs, sheet: sh.getName() };
+  return { columns: values[0] || [], rows: values.slice(1), decisions: readDecisions_(ss, tz), sheets: tabs,
+           sheet: sh.getName() };
 }
 
 // ── Решения ОТК (пишутся в ту же Google-таблицу, на отдельный лист) ────────
@@ -360,21 +472,30 @@ function readDecisions_(ss, tz) {
 
 /** Решения ставит только руководитель проекта (или администратор). Одна
  *  строка на анкету: повторное решение перезаписывает прежнее, пустое —
- *  удаляет. Нужны права «Редактор» у аккаунта сервера на эту таблицу. */
+ *  удаляет. Нужны права «Редактор» у аккаунта, который пишет в таблицу. */
 function setDecisions_(me, req) {
   if (me.role !== 'lead' && me.role !== 'admin') throw new Error('Решения по анкетам ставит только руководитель проекта');
-  var src = null;
-  var all = readRows_(SHEET_SOURCES, SOURCES_HEADER);
-  for (var i = 0; i < all.length; i++) if (String(all[i].id) === String(req.source_id)) src = all[i];
-  if (!src) throw new Error('Источник не найден');
-  if (!canUse_(me, src)) throw new Error('Нет доступа к источнику «' + src.name + '»');
+  var src = findSource_(me, req.source_id);
   var items = req.items || [];
   for (var k = 0; k < items.length; k++) {
     var d = String(items[k].decision || '');
     if (d && DECISION_VALUES.indexOf(d) < 0) throw new Error('Неизвестное решение: ' + d);
     if (!String(items[k].id || '').trim()) throw new Error('У анкеты нет ID');
   }
-  var ss = SpreadsheetApp.openByUrl(src.url);
+  var bridge = sourceBridge_(src);
+  var decisions;
+  if (bridge) {
+    decisions = callBridge_(bridge, { action: 'decide', url: src.url, items: items, by: me.login, label: src.name }).decisions;
+  } else {
+    decisions = writeDecisions_(SpreadsheetApp.openByUrl(src.url), items, me.login,
+      'Сервер не может записать решения в «' + src.name + '». Дайте ' + serverEmail_() +
+      ' право «Редактор» в настройках доступа этой таблицы.');
+  }
+  log_(me.login, 'set_decisions', src.name + ': ' + items.length + ' анкет');
+  return { decisions: decisions };
+}
+
+function writeDecisions_(ss, items, by, noRights) {
   var sh = ss.getSheetByName(DECISIONS_SHEET);
   try {
     if (!sh) {
@@ -384,8 +505,7 @@ function setDecisions_(me, req) {
       sh.setFrozenRows(1);
     }
   } catch (err) {
-    throw new Error('Сервер не может записать решения в «' + src.name + '». Дайте ' + serverEmail_() +
-                    ' право «Редактор» в настройках доступа этой таблицы.');
+    throw new Error(noRights);
   }
   var values = sh.getDataRange().getValues();
   var rowOf = {};
@@ -395,7 +515,7 @@ function setDecisions_(me, req) {
   try {
     items.forEach(function (it) {
       var id = String(it.id).trim();
-      var row = [id, String(it.decision || ''), String(it.reason || ''), String(it.comment || ''), me.login, stamp];
+      var row = [id, String(it.decision || ''), String(it.reason || ''), String(it.comment || ''), by, stamp];
       if (!it.decision) {
         if (rowOf[id]) toDelete.push(rowOf[id]);
       } else if (rowOf[id]) {
@@ -407,11 +527,9 @@ function setDecisions_(me, req) {
     });
     toDelete.sort(function (a, b) { return b - a; }).forEach(function (r) { sh.deleteRow(r); });
   } catch (err) {
-    throw new Error('Сервер не может записать решения в «' + src.name + '». Дайте ' + serverEmail_() +
-                    ' право «Редактор» в настройках доступа этой таблицы.');
+    throw new Error(noRights);
   }
-  log_(me.login, 'set_decisions', src.name + ': ' + items.length + ' анкет');
-  return { decisions: readDecisions_(ss, ss.getSpreadsheetTimeZone()) };
+  return readDecisions_(ss, ss.getSpreadsheetTimeZone());
 }
 
 // ── Журнал ─────────────────────────────────────────────────────────────────
@@ -454,6 +572,9 @@ function sheet_(name, header) {
     sh = book.insertSheet(name);
     sh.appendRow(header);
     sh.setFrozenRows(1);
+  } else {
+    // новые колонки после обновления кода дописываются справа
+    for (var j = sh.getLastColumn(); j < header.length; j++) sh.getRange(1, j + 1).setValue(header[j]);
   }
   return sh;
 }
@@ -496,6 +617,7 @@ function setup() {
   sheet_(SHEET_USERS, USERS_HEADER);
   sheet_(SHEET_SOURCES, SOURCES_HEADER);
   sheet_(SHEET_LOG, LOG_HEADER);
+  sheet_(SHEET_BRIDGES, BRIDGES_HEADER);
   secret_();
   var admins = readRows_(SHEET_USERS, USERS_HEADER).filter(function (u) { return u.role === 'admin'; });
   if (admins.length) {

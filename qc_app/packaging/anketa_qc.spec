@@ -11,7 +11,8 @@ a = Analysis(
     pathex=[str(ROOT)],
     datas=[(str(ROOT / "anketa_qc" / "web"), "anketa_qc/web"),
            (str(ROOT / "anketa_qc" / "geo_plan_default.json"), "anketa_qc"),
-           (str(ROOT / "anketa_qc" / "cities_uz.json"), "anketa_qc")]
+           (str(ROOT / "anketa_qc" / "cities_uz.json"), "anketa_qc"),
+           (str(ROOT / "server" / "Connector.gs"), "anketa_qc/server")]
           + collect_data_files("docx"),          # шаблон пустого документа для отчёта Word
     hiddenimports=["openpyxl", "matplotlib.backends.backend_agg"],
     excludes=["tkinter", "matplotlib.backends.backend_tkagg", "matplotlib.backends._backend_tk",

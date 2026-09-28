@@ -16,6 +16,7 @@ class Sheet {
   appendRow(r) { if (this.readonly) throw new Error("нет прав на запись"); this.rows.push(r.slice()); }
   setFrozenRows() {}
   getLastRow() { return this.rows.length; }
+  getLastColumn() { return Math.max(0, ...this.rows.map((r) => r.length)); }
   deleteRow(i) { this.rows.splice(i - 1, 1); }
   getDataRange() {
     const w = Math.max(0, ...this.rows.map((r) => r.length));
@@ -39,7 +40,10 @@ class Book {
   getSpreadsheetTimeZone() { return "Asia/Tashkent"; }
 }
 
-function makeEnv(standalone = false) {
+// Веб-приложения по адресу (личные коннекторы руководителей): url → doPost
+const WEB = {};
+
+function makeEnv(standalone = false, file = "Code.gs", email = "server@example.com") {
   const registry = new Book();
   const created = [];
   const external = {};
@@ -74,15 +78,33 @@ function makeEnv(standalone = false) {
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     ContentService: { MimeType: { JSON: "json" }, createTextOutput: (t) => ({ setMimeType: () => ({ text: t }) }) },
     Logger: { log: (m) => logs.push(m) },
-    Session: { getScriptTimeZone: () => "Asia/Tashkent", getEffectiveUser: () => ({ getEmail: () => "server@example.com" }) },
+    Session: { getScriptTimeZone: () => "Asia/Tashkent", getEffectiveUser: () => ({ getEmail: () => email }) },
+    UrlFetchApp: {
+      fetch: (url, opt) => {
+        if (!WEB[url]) throw new Error("Address unavailable: " + url);
+        // как Apps Script: JSON уходит строкой и приходит строкой
+        const text = WEB[url](String(opt.payload));
+        return { getContentText: () => text };
+      },
+    },
   };
   vm.createContext(ctx);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "server", "Code.gs"), "utf8"), ctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "server", file), "utf8"), ctx);
   const call = (body) => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(body) } }).text);
   return { ctx, registry, external, logs, call, cache, created };
 }
 
-module.exports = { makeEnv, Book, Sheet };
+/** Личный коннектор (server/Connector.gs) в Google-аккаунте руководителя,
+ *  развёрнутый по адресу url. Таблицы — те, что видит сам руководитель. */
+function makeConnector(url, email) {
+  const env = makeEnv(true, "Connector.gs", email);
+  env.ctx.setup();
+  env.key = env.logs.join("\n").match(/Ключ коннектора: (\S+)/)[1];
+  WEB[url] = (body) => env.ctx.doPost({ postData: { contents: body } }).text;
+  return env;
+}
+
+module.exports = { makeEnv, makeConnector, Book, Sheet, WEB };
 if (require.main !== module) return;
 
 // ── Сценарий ───────────────────────────────────────────────────────────────
@@ -239,6 +261,104 @@ assert.ok(r.call({ action: "login", login: "admin", password: newPass }).token);
   assert.strictEqual(f.rows.length, 2, "лист решений не смешивается с анкетами");
   assert.deepStrictEqual(f.decisions.map((d) => d.decision), ["Принять"]);
   assert.strictEqual(e.external["DDD"].getSheets()[0].name, "data");
+}
+
+// личный коннектор: руководитель подключает свои таблицы через свою почту,
+// аккаунту сервера доступ к ним не нужен
+{
+  const e = makeEnv();
+  e.ctx.setup();
+  const pw = e.logs.join("\n").match(/Пароль: (\S+)/)[1];
+  const A = e.call({ action: "login", login: "admin", password: pw }).token;
+  const lead = e.call({ action: "create_user", token: A, login: "dilnoza", team: "Bank", role: "lead" });
+  const sup = e.call({ action: "create_user", token: A, login: "sup2", team: "Bank" });
+  const alien = e.call({ action: "create_user", token: A, login: "alien", team: "Other", role: "lead" });
+  const L = e.call({ action: "login", login: "dilnoza", password: lead.password });
+  const U = e.call({ action: "login", login: "sup2", password: sup.password }).token;
+  const X = e.call({ action: "login", login: "alien", password: alien.password }).token;
+  assert.strictEqual(L.bridge, null);
+
+  const url = "https://script.google.com/macros/s/LEADBRIDGE/exec";
+  const con = makeConnector(url, "dilnoza@gmail.com");
+  con.external["KOBO"] = new Book([new Sheet("Kobo", [["_id", "start"], [7, new Date(Date.UTC(2025, 9, 1, 5, 0))]]),
+    new Sheet("ТЗ", [["_id"], [8]])]);
+  assert.ok(!e.external["KOBO"], "у сервера доступа к таблице нет");
+
+  // без коннектора — подсказка про оба способа
+  assert.match(e.call({ action: "add_source", token: L.token, name: "Bank", url: "https://docs.google.com/spreadsheets/d/KOBO/edit" }).error,
+    /свой Google-аккаунт/);
+  assert.match(e.call({ action: "add_source", token: L.token, name: "Bank", via: "bridge", url: "https://docs.google.com/spreadsheets/d/KOBO/edit" }).error,
+    /Сначала подключите/);
+  assert.match(e.call({ action: "set_bridge", token: L.token, url: "https://example.com/x", key: con.key }).error, /script\.google\.com/);
+  assert.match(e.call({ action: "set_bridge", token: L.token, url, key: "wrong" }).error, /Неверный ключ/);
+  assert.match(e.call({ action: "set_bridge", token: L.token, url: "https://script.google.com/macros/s/NOPE/exec", key: "k" }).error, /Нет связи/);
+  const sb = e.call({ action: "set_bridge", token: L.token, url, key: con.key });
+  assert.strictEqual(sb.bridge.email, "dilnoza@gmail.com");
+  assert.ok(!("key" in sb.bridge), "ключ программе не отдаётся");
+  assert.strictEqual(e.call({ action: "me", token: L.token }).bridge.email, "dilnoza@gmail.com");
+
+  assert.match(e.call({ action: "add_source", token: L.token, name: "Bank", via: "bridge", url: "https://docs.google.com/spreadsheets/d/NOPE/edit" }).error,
+    /dilnoza@gmail\.com не видит/);
+  assert.match(e.call({ action: "add_source", token: L.token, name: "Bank", via: "bridge", sheet: "нет", url: "https://docs.google.com/spreadsheets/d/KOBO/edit" }).error,
+    /нет листа/);
+  const src = e.call({ action: "add_source", token: L.token, name: "Bank", via: "bridge", url: "https://docs.google.com/spreadsheets/d/KOBO/edit" }).source;
+  assert.strictEqual(src.via, "dilnoza");
+
+  // читает и сотрудник команды — через коннектор руководителя
+  const f = e.call({ action: "fetch", token: U, source_id: src.id });
+  assert.deepStrictEqual(f.columns, ["_id", "start"]);
+  assert.deepStrictEqual(f.sheets, ["Kobo", "ТЗ"]);
+  assert.strictEqual(f.rows[0][1], "2025-10-01T10:00:00", "дата в местном времени и через коннектор");
+  assert.deepStrictEqual(e.call({ action: "fetch", token: U, source_id: src.id, sheet: "ТЗ" }).columns, ["_id"]);
+  assert.match(e.call({ action: "fetch", token: X, source_id: src.id }).error, /Нет доступа/, "другая команда не видит");
+
+  // решения пишутся в таблицу руководителя от его имени
+  const d = e.call({ action: "set_decisions", token: L.token, source_id: src.id, items: [{ id: "7", decision: "Брак", reason: "3 мин" }] });
+  assert.deepStrictEqual(d.decisions.map((x) => [x.id, x.decision, x.by]), [["7", "Брак", "dilnoza"]]);
+  assert.strictEqual(con.external["KOBO"].getSheetByName("Решения ОТК").rows.length, 2);
+  assert.match(e.call({ action: "set_decisions", token: U, source_id: src.id, items: [{ id: "7", decision: "Брак" }] }).error, /руководитель/);
+  con.external["KOBO"].readonly = true;
+  con.external["KOBO"].getSheetByName("Решения ОТК").readonly = true;
+  assert.match(e.call({ action: "set_decisions", token: L.token, source_id: src.id, items: [{ id: "8", decision: "Брак" }] }).error,
+    /dilnoza@gmail\.com не может записать/);
+
+  // новый ключ: старый перестаёт работать, программа просит обновить
+  con.ctx.newKey();
+  assert.match(e.call({ action: "fetch", token: U, source_id: src.id }).error, /Неверный ключ/);
+  const key2 = con.logs.join("\n").match(/Новый ключ коннектора: (\S+)/)[1];
+  e.call({ action: "set_bridge", token: L.token, url, key: key2 });
+  const f3 = e.call({ action: "fetch", token: U, source_id: src.id });
+  assert.strictEqual(f3.rows && f3.rows.length, 1, JSON.stringify(f3));
+  assert.strictEqual(e.registry.getSheetByName("Коннекторы").rows.length, 2, "одна строка на руководителя");
+
+  // отключили коннектор — понятная ошибка
+  assert.strictEqual(e.call({ action: "set_bridge", token: L.token, url: "" }).bridge, null);
+  assert.match(e.call({ action: "fetch", token: U, source_id: src.id }).error, /коннектор отключён/);
+
+  // коннектор без ключа ничего не отдаёт
+  assert.match(JSON.parse(WEB[url](JSON.stringify({ action: "read", url: "https://docs.google.com/spreadsheets/d/KOBO/edit" }))).error, /Неверный ключ/);
+  assert.strictEqual(JSON.parse(con.ctx.doGet().text).service, "AnketaQC-connector");
+
+  // общие функции в Code.gs и Connector.gs одинаковы
+  for (const name of ["readBook_", "readDecisions_", "writeDecisions_", "now_"]) {
+    assert.strictEqual(con.ctx[name].toString(), e.ctx[name].toString(), name + " разошлись между Code.gs и Connector.gs");
+  }
+}
+
+// реестр от старой версии: колонка via дописывается, старые источники работают
+{
+  const e = makeEnv();
+  e.registry.sheets.push(new Sheet("Источники", [["id", "team", "project", "name", "url", "sheet", "added_by", "created"],
+    ["s1", "T", "", "Старая", "https://docs.google.com/spreadsheets/d/OLD/edit", "", "admin", ""]]));
+  e.external["OLD"] = new Book([new Sheet("data", [["a"], [1]])]);
+  e.ctx.setup();
+  const pw = e.logs.join("\n").match(/Пароль: (\S+)/)[1];
+  const A = e.call({ action: "login", login: "admin", password: pw }).token;
+  assert.strictEqual(e.registry.getSheetByName("Источники").rows[0][8], "via");
+  assert.strictEqual(e.call({ action: "fetch", token: A, source_id: "s1" }).rows.length, 1);
+  const s2 = e.call({ action: "add_source", token: A, team: "T", name: "Новая", url: "https://docs.google.com/spreadsheets/d/OLD/edit" }).source;
+  assert.strictEqual(s2.via, "");
+  assert.strictEqual(e.call({ action: "sources", token: A }).sources.length, 2);
 }
 
 console.log("gas_harness: OK");

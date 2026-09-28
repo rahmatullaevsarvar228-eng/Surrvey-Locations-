@@ -17,6 +17,15 @@ from .history import Store
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
 
+def connector_path():
+    """server/Connector.gs: в сборке лежит рядом с пакетом, в исходниках — в qc_app/server."""
+    here = Path(__file__).resolve().parent
+    for p in (here / "server" / "Connector.gs", here.parent / "server" / "Connector.gs"):
+        if p.exists():
+            return p
+    return None
+
+
 class Session:
     """Состояние одного пользователя: приложение однооконное и локальное."""
 
@@ -32,6 +41,7 @@ class Session:
         self.user = None
         self.sources = []
         self.server_email = ""
+        self.bridge = None     # личный коннектор руководителя: {"email", "url"} или None
         self.seen_ids = None   # ID анкет на прошлой проверке — чтобы показать, сколько пришло новых
         # Решения руководителя: {(id источника, ID анкеты): {...}} и названия источников
         self.decisions = {}
@@ -41,6 +51,7 @@ class Session:
 
     def logout(self):
         self.client, self.user, self.sources, self.server_email = None, None, [], ""
+        self.bridge = None
         self.sheets, self.source_label, self.result, self.seen_ids = {}, None, None, None
         self.decisions, self.source_names, self.source_tabs, self.tech_frames = {}, {}, {}, []
 
@@ -376,6 +387,7 @@ def create_app(data_dir, client_factory=RemoteClient):
         data = client.login((body.get("login") or "").strip(), body.get("password") or "")
         sess.client, sess.user, sess.sources = client, data["user"], data.get("sources", [])
         sess.server_email = data.get("server_email", "")
+        sess.bridge = data.get("bridge")
         sess.store.set_setting("server_url", url)
         sess.store.set_setting("last_login", data["user"]["login"])
         return jsonify(auth_payload())
@@ -404,8 +416,22 @@ def create_app(data_dir, client_factory=RemoteClient):
     def remote_source_add():
         body = request.json or {}
         sess.client.call("add_source", name=body.get("name", ""), url=body.get("url", ""),
-                         sheet=body.get("sheet", ""), project=sess.project)
+                         sheet=body.get("sheet", ""), project=sess.project, via=body.get("via", ""))
         return reload_sources()
+
+    @app.get("/api/remote/connector")
+    def remote_connector():
+        """Код личного коннектора — руководитель копирует его в свой Apps Script."""
+        p = connector_path()
+        return jsonify({"code": p.read_text("utf-8") if p else ""})
+
+    @app.post("/api/remote/bridge")
+    def remote_bridge():
+        """Личный коннектор: руководитель подключает свои таблицы через свою почту."""
+        body = request.json or {}
+        sess.bridge = sess.client.call("set_bridge", url=(body.get("url") or "").strip(),
+                                       key=(body.get("key") or "").strip()).get("bridge")
+        return jsonify({"bridge": sess.bridge})
 
     @app.post("/api/remote/sources/delete")
     def remote_source_delete():
@@ -585,6 +611,7 @@ def create_app(data_dir, client_factory=RemoteClient):
             "remote_sources": sess.sources,
             "source_tabs": sess.source_tabs,
             "server_email": sess.server_email,
+            "bridge": sess.bridge,
         }
 
     @app.get("/api/state")

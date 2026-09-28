@@ -71,6 +71,10 @@ class FakeClient:
                 else:
                     sheet.pop(it["id"], None)
             return {"decisions": list(sheet.values())}
+        if action == "set_bridge":
+            if params["url"] and params["key"] != "k1":
+                raise RemoteError("Неверный ключ коннектора")
+            return {"bridge": {"email": f"{self.user}@gmail.com", "url": params["url"]} if params["url"] else None}
         if action == "create_user":
             return {"login": params["login"], "password": "Abc123xyz9"}
         return {"ok": True}
@@ -189,6 +193,27 @@ def test_team_adds_and_removes_own_sources(tmp_path):
     lst = client.post("/api/remote/sources/add", json={"name": "Ташкент", "url": "https://docs.google.com/spreadsheets/d/A"}).get_json()
     assert [x["name"] for x in lst] == ["Ташкент"]
     assert client.post("/api/remote/sources/delete", json={"id": "Ташкент"}).get_json() == []
+
+
+def test_lead_connects_own_google_account(tmp_path):
+    """Руководитель подключает таблицы через свою почту (личный коннектор)."""
+    FakeClient.frames = {}
+    app = create_app(tmp_path, client_factory=FakeClient)
+    client = app.test_client()
+    login(client, "boss")
+    assert client.get("/api/state").get_json()["bridge"] is None
+    code = client.get("/api/remote/connector").get_json()["code"]
+    assert "function setup()" in code and "Ключ коннектора" in code, "код коннектора доступен в программе"
+    url = "https://script.google.com/macros/s/X/exec"
+    assert client.post("/api/remote/bridge", json={"url": url, "key": "bad"}).status_code == 400
+    b = client.post("/api/remote/bridge", json={"url": url, "key": " k1 "}).get_json()["bridge"]
+    assert b["email"] == "boss@gmail.com"
+    assert client.get("/api/state").get_json()["bridge"]["email"] == "boss@gmail.com"
+    client.post("/api/remote/sources/add", json={"name": "Bank", "url": "https://docs.google.com/spreadsheets/d/B",
+                                                 "via": "bridge"})
+    added = [c for a, c in app.config["SESSION"].client.calls if a == "add_source"]
+    assert added[-1]["via"] == "bridge", "способ подключения уходит на сервер"
+    assert client.post("/api/remote/bridge", json={"url": ""}).get_json()["bridge"] is None
 
 
 def test_auto_refresh_reports_new_anketas(tmp_path, demo_bytes):

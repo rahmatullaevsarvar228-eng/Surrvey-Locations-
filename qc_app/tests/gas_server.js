@@ -2,17 +2,21 @@
 // в имитации сервисов Google, доступный по HTTP.
 // node tests/gas_server.js <порт> <tables.json>
 // tables.json: {"<ID таблицы>": {"<лист>": [[заголовки], [строка], ...]}}
+// С третьим аргументом «connector» таблицы видит не сервер, а личный коннектор
+// руководителя https://script.google.com/macros/s/DEV/exec (ключ — в выводе).
 "use strict";
 const http = require("http");
 const fs = require("fs");
-const { makeEnv, Book, Sheet } = require("./gas_harness");
+const { makeEnv, makeConnector, Book, Sheet } = require("./gas_harness");
 
 const port = Number(process.argv[2] || 8799);
 const env = makeEnv();
 if (process.argv[3]) {
   const tables = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+  const target = process.argv[4] === "connector" ? makeConnector("https://script.google.com/macros/s/DEV/exec", "lead@gmail.com") : env;
+  if (target !== env) console.log("Ключ коннектора: " + target.key);
   for (const [id, sheets] of Object.entries(tables)) {
-    env.external[id] = new Book(Object.entries(sheets).map(([name, rows]) => new Sheet(name, rows)));
+    target.external[id] = new Book(Object.entries(sheets).map(([name, rows]) => new Sheet(name, rows)));
   }
 }
 env.ctx.setup();
