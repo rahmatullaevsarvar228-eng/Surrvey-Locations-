@@ -34,6 +34,9 @@ def table(result, cfg, decisions_by_pos, filters=None):
     grp = iv.groupby(["inter", "day"])
     total = grp.size()
     brak = grp["state"].apply(lambda s: int((s == "brak").sum()))
+    # отсев (скринаут) — не интервью: в норму не идёт
+    iv["scr"] = iv["screenout"] & (iv["state"] != "brak") if "screenout" in iv else False
+    scr = iv.groupby(["inter", "day"])["scr"].sum()
     rows = []
     for inter in inters:
         cells, worked, low = [], 0, 0
@@ -41,7 +44,7 @@ def table(result, cfg, decisions_by_pos, filters=None):
         for d in days:
             n = int(total.get((inter, d), 0))
             b = int(brak.get((inter, d), 0))
-            ok = n - b
+            ok = n - b - int(scr.get((inter, d), 0))
             st = NONE if n == 0 else (LOW if norm and ok < norm else OK)
             worked += n > 0
             low += st == LOW

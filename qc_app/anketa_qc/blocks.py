@@ -34,6 +34,8 @@ CODE_AREA = {
     "probe_low_avg": OPEN,
     "external": "Аудиоконтроль / мониторинг",
     "near_dup": "Ответы анкеты (сравнение с другими)",
+    "logic": "Логика ответов",
+    "screenout": "Заполнение анкеты",
     "block_fast": TIME,
 }
 

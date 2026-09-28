@@ -9,7 +9,7 @@ const ROLE_LABEL = { admin: "Администратор", lead: "Руковод�
 const riskTag = (v) => h("span", { class: `risk ${v >= 70 ? "hi" : v >= 40 ? "mid" : v > 0 ? "lo" : "none"}`, title: "Балл риска 0–100: чем больше и серьёзнее сигналов, тем выше" }, v ?? 0);
 const decisionTag = (d) => d ? h("span", { class: `decision ${DECISION_CLASS[d]}` }, `${DECISION_ICON[d]} ${d}`) : h("span", { class: "decision d-none" }, "не решено");
 const STATUS_LABEL = { RED: "Критично", YELLOW: "Внимание", GREEN: "Норма" };
-const SEVERITY_OPTIONS = [["defect", "Брак"], ["warning", "Предупреждение"]];
+const SEVERITY_OPTIONS = [["defect", "Брак"], ["warning", "Сомнительно"], ["note", "Для сведения"]];
 
 // ── Утилиты ───────────────────────────────────────────────────────────────
 function h(tag, attrs, ...children) {
@@ -545,6 +545,8 @@ function pageChecks(root) {
       formRow("Блок пройден слишком быстро", "Если в форме Kobo есть отметки времени начала блоков (calculate с now()) — блок быстрее этой доли обычного времени отмечается",
         [number(q, "block_fast_pct", 5, 90), h("span", { class: "unit" }, "% обычного времени"), sev(q, "block_severity")]),
       formRow("Необычные ответы интервьюера", "Сравнивать ответы респондентов каждого интервьюера с остальными (сигнал для проверки, не брак)", toggle(q, "patterns")),
+      formRow("Противоречия в ответах", "Респондент сначала сказал одно, потом другое: сам назвал бренд, а в списке «не знаю»; «ничего из перечисленного» вместе с другим вариантом. Находится само, без настройки",
+        [toggle(c.logic || (c.logic = { auto: true, severity: "warning" }), "auto"), sev(c.logic, "severity")]),
       formRow("Выборка на прослушку", "Доля случайных анкет у каждого интервьюера: обычно / новые (первые 2 дня) / в зоне риска",
         [number(L, "base_pct", 0, 100), h("span", { class: "unit" }, "%"), number(L, "new_pct", 0, 100), h("span", { class: "unit" }, "%"), number(L, "risk_pct", 0, 100), h("span", { class: "unit" }, "%")]))));
   const nightRows = h("div", {});
@@ -1331,7 +1333,8 @@ async function openAnketa(pos) {
     decideBox,
     h("h3", {}, d.issues.length ? "Почему система отметила анкету" : "Замечаний нет"),
     h("ul", { class: "why" }, d.issues.map((i) => h("li", { class: i.severity },
-      h("span", { class: `pill ${i.severity === "defect" ? "RED" : "YELLOW"}` }, i.severity === "defect" ? "Брак" : "Сомнительно"),
+      h("span", { class: `pill ${i.severity === "defect" ? "RED" : i.severity === "note" ? "GRAY" : "YELLOW"}` },
+        i.severity === "defect" ? "Брак" : i.severity === "note" ? "Для сведения" : "Сомнительно"),
       h("div", { class: "t" }, i.label, h("span", { class: "blk" }, `Блок: ${i.block}`)),
       h("div", {}, i.text),
       h("div", { class: "l" }, "Логика: ", i.logic),

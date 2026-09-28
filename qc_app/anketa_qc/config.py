@@ -102,7 +102,7 @@ DEFAULT_CONFIG = {
         "min_sep_km": 1.5,           # радиус «одного места» для скоплений
         "same_point_min": 3,         # столько анкет с одинаковыми координатами — подозрительно
         "far_severity": "warning",
-        "cluster_severity": "warning",
+        "cluster_severity": "note",   # у точки опроса скопление — норма
         "same_severity": "warning",
         "no_gps_severity": "warning",
         "max_speed_kmh": 60,         # «телепорт»: быстрее этого между анкетами не переместиться
@@ -125,6 +125,9 @@ DEFAULT_CONFIG = {
     "listen": {"base_pct": 5, "new_pct": 15, "risk_pct": 20},
     # Норма анкет в день на интервьюера (засчитанных, без брака); 0 — не задана.
     # team — список кодов интервьюеров, чтобы видеть и тех, кто ничего не прислал.
+    # Противоречия в ответах (назвал бренд сам, а в списке «не знаю»;
+    # «ничего из перечисленного» вместе с другим вариантом) — не брак
+    "logic": {"auto": True, "severity": "warning"},
     "daily": {"min": 0, "team": []},
     "remote_sources": [],        # ID таблиц Google Sheets проекта на сервере доступа
     "source_sheets": {},         # {ID таблицы: лист, который проверять}; пусто — лист по умолчанию
@@ -169,6 +172,8 @@ def smart_default(columns, patterns):
             if cl == p:
                 return c
     for c, cl in lowered:
+        if len(cl) > 100:      # длинный текст-пояснение («Спасибо… имя и номер телефона»), не вопрос
+            continue
         toks = _tokens(cl)
         for p in patterns:
             if len(p.strip("_ ")) <= 5:

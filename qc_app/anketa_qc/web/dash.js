@@ -232,17 +232,19 @@ function headline(anks) {
   const c = counts(anks);
   const p = pct(c.brak, c.iv);
   const st = S.result.status_cfg;
-  const lvl = p >= st.yellow_pct ? "RED" : p >= st.yellow_pct / 2 ? "YELLOW" : "GREEN";
+  let lvl = p >= st.yellow_pct ? "RED" : p >= st.yellow_pct / 2 ? "YELLOW" : "GREEN";
   const byCity = [...groupBy(anks.filter((a) => !a.technical), "city")].map(([k, v]) => [k, pct(v.filter(isBrak).length, v.length), v.length])
     .filter((x) => x[2] >= 5).sort((a, b) => b[1] - a[1]);
   const byInter = [...groupBy(anks.filter((a) => !a.technical), "inter")].map(([k, v]) => [k, pct(v.filter(isBrak).length, v.length)])
     .sort((a, b) => b[1] - a[1]);
   const top = reasonCounts(anks.filter(isBrak), "defect")[0];
-  const title = { RED: "Много брака — нужно вмешаться", YELLOW: "Есть проблемы — стоит посмотреть", GREEN: "Поле идёт нормально" }[lvl];
   const parts = [`Брак ${fmt(p, 1)}% (${fmt(c.brak)} из ${fmt(c.iv)} анкет).`];
   if (c.brak && byCity.length && byCity[0][1] > 0) parts.push(`Больше всего — ${byCity[0][0]} (${fmt(byCity[0][1], 0)}%).`);
   if (top) parts.push(`Главная причина: «${label(top[0])}».`);
   const worst = byInter.filter((x) => levelOf(x[1]) === "RED").map((x) => x[0]);
+  // есть интервьюер в красной зоне — «всё нормально» писать нельзя
+  if (worst.length && lvl === "GREEN") lvl = "YELLOW";
+  const title = { RED: "Много брака — нужно вмешаться", YELLOW: "Есть проблемы — стоит посмотреть", GREEN: "Поле идёт нормально" }[lvl];
   if (worst.length) parts.push(`В красной зоне: ${worst.slice(0, 4).join(", ")}${worst.length > 4 ? ` и ещё ${worst.length - 4}` : ""}.`);
   return h("div", { class: `hero ${lvl}` },
     h("div", { class: "hero-light" }, h("i", { class: "r" }), h("i", { class: "y" }), h("i", { class: "g" })),
@@ -410,7 +412,7 @@ function pageDefects(root) {
   const inters = new Set(sel.map((a) => a.inter));
   const cities = new Set(sel.map((a) => a.city));
   root.append(h("div", { class: "stats" },
-    tile(sev === "defect" ? "Анкет с браком" : "Анкет «проверить»", fmt(sel.length), `${fmt(pct(sel.length, c.iv), 1)}% всех анкет`, sev === "defect" ? "red" : "yellow"),
+    tile(sev === "defect" ? "Анкет с браком" : "Сомнительных анкет", fmt(sel.length), `${fmt(pct(sel.length, c.iv), 1)}% всех анкет`, sev === "defect" ? "red" : "yellow"),
     tile("Интервьюеров", fmt(inters.size), `из ${fmt(new Set(anks.map((a) => a.inter)).size)}`),
     tile("Городов", fmt(cities.size), `из ${fmt(new Set(anks.map((a) => a.city)).size)}`),
     tile("Средний риск", fmt(sel.length ? sel.reduce((x, a) => x + a.risk, 0) / sel.length : 0), "балл 0–100 по сигналам")));
@@ -772,14 +774,14 @@ function dailyData(anks) {
   const by = new Map();
   for (const a of iv) {
     const k = `${a.inter}|${a.date}`;
-    const x = by.get(k) || { n: 0, brak: 0, list: [] };
-    x.n++; if (isBrak(a)) x.brak++; x.list.push(a);
+    const x = by.get(k) || { n: 0, brak: 0, scr: 0, list: [] };
+    x.n++; if (isBrak(a)) x.brak++; else if (a.screenout) x.scr++; x.list.push(a);
     by.set(k, x);
   }
   const rows = inters.map((inter) => {
     const cells = days.map((day) => {
-      const x = by.get(`${inter}|${day}`) || { n: 0, brak: 0, list: [] };
-      const ok = x.n - x.brak;
+      const x = by.get(`${inter}|${day}`) || { n: 0, brak: 0, scr: 0, list: [] };
+      const ok = x.n - x.brak - x.scr;   // отсев (не подошёл по возрасту и т.п.) в норму не идёт
       return { ...x, ok, day, st: x.n === 0 ? "off" : norm && ok < norm ? "low" : "good" };
     });
     const worked = cells.filter((c) => c.n).length;

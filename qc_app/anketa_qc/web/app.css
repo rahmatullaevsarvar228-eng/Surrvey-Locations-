@@ -686,3 +686,6 @@ body.is-admin .menu-pop .admin-only { display: block; }
 details.how { padding: 16px 22px; }
 details.how > summary { cursor: pointer; font-weight: 600; font-size: 16px; }
 details.how[open] > summary { margin-bottom: 12px; }
+
+.pill.GRAY { background: rgba(120,120,128,0.14); color: var(--muted, #6e6e73); }
+.why li.note { opacity: 0.85; }

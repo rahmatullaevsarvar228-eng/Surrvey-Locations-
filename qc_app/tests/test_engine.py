@@ -600,3 +600,52 @@ def test_data_checks_warn_when_time_not_read(cfg):
     raw["start"] = "не время"
     r = engine.run(raw, cfg)
     assert any(x["level"] == "bad" and "старта" in x["text"] for x in r["data_checks"])
+
+
+def test_logic_contradictions_are_warnings():
+    """Сам назвал банк, а в списке «Не знаю» — «сомнительно», не брак.
+    Улица с похожим названием и «ничего из перечисленного» + вариант."""
+    from anketa_qc import logic
+    n = 12
+    raw = pd.DataFrame({
+        "Название улицы/махаллы": ["Anor ko'chasi"] * n,
+        "1. Какой банк первым приходит на ум?": ["Хамкор банк", "Uzum", "Tbc", "Агробанк"] * 3,
+        "2.2. А еще какой банк?": ["Капитал банк", "Boshqa bilmaydi", "Anor bank", "Ипотека"] * 3,
+        "Q/Оформляли кредит": [1, 0, 0, 0] * 3,
+        "Q/<span>НЕ ЧИТАТЬ: Ничего из перечисленного</span>": [1, 1, 0, 0] * 3,
+        "Hamkor bank": ["Не знаю", "Знаю", "Знаю", "Знаю"] * 3,
+        "Uzum Bank": ["Знаю", "Не знаю", "Знаю", "Знаю"] * 3,
+        "Anor bank": ["Знаю", "Знаю", "Знаю", "Не знаю"] * 3,
+        "Kapitalbank": ["Не знаю", "Знаю", "Знаю", "Знаю"] * 3,
+        "Hamkor bank.3": [99, 1, 1, 1] * 3,
+    })
+    found = logic.conflicts(raw)
+    assert "Хамкор банк" in " ".join(found[0]) and "Капитал банк" in " ".join(found[0])
+    assert sum("Hamkor" in m for m in found[0]) == 1, "одно противоречие на бренд, даже если колонок две"
+    assert any("Uzum" in m for m in found[1])
+    assert any("Ничего из перечисленного" in m and "Оформляли кредит" in m for m in found[0])
+    assert 1 in found and not any("Ничего" in m for m in found[1]), "«ничего» без других вариантов — не противоречие"
+    assert 3 not in found, "«Anor ko'chasi» (улица) — не упоминание банка"
+    assert 2 not in found
+
+
+def test_placeholder_phone_and_screenout_not_brak(cfg):
+    rows = []
+    for i in range(12):
+        r = make_row(i, "D1", "A" if i % 2 else "B", f"2025-09-01 {9 + i}:00", 10, phone="998999999999")
+        r.update({f"q{k}": "ответ" for k in range(15)})
+        rows.append(r)
+    # отсев: 2 минуты, почти без ответов; через 30 с — полноценное интервью
+    so = make_row(20, "D2", "C", "2025-09-02 10:00", 2)
+    full = make_row(21, "D2", "C", "2025-09-02 10:02:30", 12)
+    full.update({f"q{k}": "ответ" for k in range(15)})
+    rows += [so, full]
+    raw = pd.DataFrame(rows)
+    c = config.default_config()
+    c["mapping"] = config.suggest_mapping(list(raw.columns))
+    r = engine.run(raw, c)
+    df = r["df"].set_index("row_id")
+    codes = {k: {(x[0], x[1]) for x in v} for k, v in df["issues"].items()}
+    assert not any(code == "dup_phone" for v in codes.values() for code, _ in v), "заглушка 998999999999 — не повтор"
+    assert ("screenout", "note") in codes["1020"] and not df.loc["1020", "is_defect"]
+    assert not {"no_rest", "start_gap"} & {x for x, _ in codes["1021"]}, "интервью после отсева — не «без перерыва»"

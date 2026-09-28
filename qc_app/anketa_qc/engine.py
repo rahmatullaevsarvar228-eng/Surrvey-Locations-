@@ -24,6 +24,9 @@ import pandas as pd
 
 DEFECT = "defect"
 WARNING = "warning"
+# «Для сведения»: видно в анкете и у интервьюера, но анкету не делает
+# сомнительной — например, у уличного опроса много анкет у одной точки.
+NOTE = "note"
 
 # Полные формулировки для сводных таблиц (по коду проблемы).
 ISSUE_LABELS = {
@@ -51,6 +54,8 @@ ISSUE_LABELS = {
     "block_empty": "Обязательный блок не заполнен",
     "external": "Брак, отмеченный вручную (аудиоконтроль / мониторинг)",
     "near_dup": "Почти копия другой анкеты (совпадает большинство ответов)",
+    "logic": "Противоречие в ответах: сначала сказал одно, потом другое",
+    "screenout": "Анкета прервана в начале (отсев или отказ)",
     "block_fast": "Блок анкеты пройден намного быстрее обычного",
     "grid_same": "Во всём блоке-сетке один и тот же ответ",
 }
@@ -75,6 +80,8 @@ SHORT_LABELS = {
     "block_empty": "Пустой обязательный блок",
     "external": "Брак по аудиоконтролю",
     "near_dup": "Почти копия другой анкеты",
+    "logic": "Противоречие в ответах",
+    "screenout": "Прервана в начале",
     "block_fast": "Блок пройден слишком быстро",
     "grid_same": "Одинаковые ответы в сетке",
     "no_gps": "Нет GPS",
@@ -109,7 +116,7 @@ STATUS_LEVELS = {
 # слабых сигналов складываются, один сильный уже даёт высокий балл.
 RISK_WEIGHTS = {
     "external": 1.0, "conveyor": 0.7, "geo_same": 0.7, "geo_city": 0.7, "overlap": 0.6, "mass_open": 0.6,
-    "block_empty": 0.5, "grid_same": 0.3, "near_dup": 0.6, "block_fast": 0.35, "geo_jump": 0.6, "dup_phone": 0.6,
+    "block_empty": 0.5, "grid_same": 0.3, "near_dup": 0.6, "logic": 0.25, "block_fast": 0.35, "geo_jump": 0.6, "dup_phone": 0.6,
     "no_device": 0.5, "too_short": 0.5, "start_gap": 0.4, "geo_far": 0.4, "no_rest": 0.35,
     "night": 0.3, "dup_name": 0.3, "probe_low_avg": 0.3, "geo_cluster": 0.3,
     "too_long": 0.2, "probe_depth": 0.2, "device_multi_inter": 0.2, "no_gps": 0.15, "inter_multi_device": 0.1,
@@ -122,6 +129,8 @@ def primary_issue(issues):
     считалась один раз."""
     best = None
     for code, sev, _ in issues:
+        if sev == NOTE:
+            continue
         key = (sev == DEFECT, RISK_WEIGHTS.get(code, 0.5 if sev == DEFECT else 0.25))
         if best is None or key > best[0]:
             best = (key, code)
@@ -131,6 +140,8 @@ def primary_issue(issues):
 def risk_score(issues):
     keep = 1.0
     for code, sev, _ in issues:
+        if sev == NOTE:
+            continue
         w = RISK_WEIGHTS.get(code)
         if w is None:                      # пользовательские правила
             w = 0.5 if sev == DEFECT else 0.25
@@ -248,6 +259,30 @@ def _is_blank(series):
     return series.isna() | (series.astype(str).str.strip() == "")
 
 
+def roles_of(m):
+    return {c for c in m.values() if c}
+
+
+_META_COL = re.compile(r"^_|latitude|longitude|altitude|precision|audio|video|url|deviceid|^start$|^end$|^today$|"
+                       r"submission|uuid|^rnd$|^quota|random", re.IGNORECASE)
+
+
+def _auto_completed(raw, df, roles):
+    cols = [c for c in raw.columns if c not in roles and not _META_COL.search(str(c))]
+    if len(cols) < 10:
+        return pd.Series(True, index=df.index), None
+    answered = (~raw[cols].apply(_is_blank)).sum(axis=1)
+    base = answered[~df["technical"]]
+    if not len(base):
+        return pd.Series(True, index=df.index), None
+    typical = float(base.median())
+    if typical < 10:
+        return pd.Series(True, index=df.index), None
+    done = answered >= typical * 0.4
+    n = int((~done & ~df["technical"]).sum())
+    return done, ({"n": n, "typical": int(typical)} if n else None)
+
+
 def prepare(raw, cfg):
     """Стандартная таблица анкет. raw и результат выровнены по позиции:
     колонка pos указывает на строку raw (после отбрасывания пустых строк)."""
@@ -286,8 +321,13 @@ def prepare(raw, cfg):
     done_cols = [c for c in cfg.get("completed_cols") or [] if c in raw.columns]
     if done_cols:
         df["completed"] = (~raw[done_cols].apply(_is_blank)).any(axis=1)
+        df.attrs["screenout_info"] = None
     else:
-        df["completed"] = True
+        # Отсев (респонденту 14 лет, не пользуется смартфоном…) — анкета
+        # обрывается в начале. Узнаём по числу ответов: у отсева их намного
+        # меньше, чем у обычной анкеты. Такая запись — не интервью.
+        df["completed"], df.attrs["screenout_info"] = _auto_completed(raw, df, roles_of(m))
+    df["screenout"] = ~df["completed"] & ~df["technical"]
     df["completed"] &= ~df["technical"] & ~df["rejected"]   # техническая запись — не интервью; брак мониторинга не проверяем
 
     # Техническое задание нужно в цепочке по времени на устройстве, даже если
@@ -460,9 +500,13 @@ def plural(n, one, few, many):
 
 def normalize_phone(v):
     digits = re.sub(r"\D", "", str(v)) if v is not None else ""
-    if len(digits) < 7 or len(set(digits)) == 1:
-        return None   # «0», «999999999» и прочие заглушки — не телефон
-    return digits[-9:]
+    if digits.endswith("0") and re.fullmatch(r"\d+\.0", str(v).strip() or ""):
+        digits = digits[:-1]                  # 998901234567.0 из Excel
+    tail = digits[-9:]
+    # «0», «998999999999», «123456789» — заглушки «отказался дать телефон»
+    if len(digits) < 7 or len(set(tail)) == 1 or len(set(tail[-7:])) == 1 or tail in ("123456789", "987654321"):
+        return None
+    return tail
 
 
 def normalize_name(v, answer_filter):
@@ -511,10 +555,10 @@ def run(raw_input, cfg):
     code_devs = with_dev.groupby("inter")["deviceid"].agg(lambda s: sorted(s.unique(), key=str))
     multi_dev = {d: c for d, c in dev_codes.items() if len(c) > 1}
     multi_code = {c: d for c, d in code_devs.items() if len(d) > 1}
-    add(df["deviceid"].isin(list(multi_dev)), "device_multi_inter", WARNING,
+    add(df["deviceid"].isin(list(multi_dev)), "device_multi_inter", NOTE,
         lambda i: f"1 устройство → {len(multi_dev[df.at[i, 'deviceid']])} кодов интервьюера "
                   f"({_fmt_list(multi_dev[df.at[i, 'deviceid']])})")
-    add(df["inter"].isin(list(multi_code)) & df["deviceid"].notna(), "inter_multi_device", WARNING,
+    add(df["inter"].isin(list(multi_code)) & df["deviceid"].notna(), "inter_multi_device", NOTE,
         lambda i: f"1 код интервьюера → {len(multi_code[df.at[i, 'inter']])} устройств "
                   f"({_fmt_list(multi_code[df.at[i, 'inter']])})")
 
@@ -522,6 +566,14 @@ def run(raw_input, cfg):
     # длительности, интервалов, «конвейера», дубликатов, зондажа и правил к
     # ним не применяются.
     iv = ~df["technical"]
+
+    # --- Отсев / анкета прервана в начале (для сведения, не брак) ------------
+    so = df.attrs.get("screenout_info") or {}
+    if so:
+        answered = so.get("typical")
+        add(df["screenout"], "screenout", NOTE,
+            lambda i: f"в анкете мало ответов (обычно ~{answered}) — прервана в начале: отсев или отказ. "
+                      "Не брак, но и в норму не идёт")
 
     # --- Длительность --------------------------------------------------------
     dur = df["duration_min"]
@@ -542,7 +594,10 @@ def run(raw_input, cfg):
     prev_start, prev_end = by_dev["start"].shift(1), by_dev["end"].shift(1)
     prev_id = by_dev["row_id"].shift(1)
     prev_tech = by_dev["technical"].shift(1).fillna(False).astype(bool)
-    after_interview = iv & prev_start.notna() & ~prev_tech
+    # отсев перед анкетой — тоже не интервью: подошёл, не подошёл по возрасту,
+    # сразу к следующему — это не брак
+    prev_screen = by_dev["screenout"].shift(1).fillna(False).astype(bool)
+    after_interview = iv & ~df["screenout"] & prev_start.notna() & ~prev_tech & ~prev_screen
     df["prev_tech"] = prev_tech & iv
     df["gap_min"] = ((df["start"] - prev_start).dt.total_seconds() / 60).where(after_interview)
     df["rest_min"] = ((df["start"] - prev_end).dt.total_seconds() / 60).where(after_interview)
@@ -617,6 +672,10 @@ def run(raw_input, cfg):
             continue
         if key == "phone":
             norm = df[col].map(normalize_phone)
+            # Один номер у многих разных интервьюеров — это заглушка отказа
+            # (у каждого своя «99 999 99 99»), а не один и тот же респондент.
+            spread = df.assign(_p=norm).dropna(subset=["_p"]).groupby("_p")["inter"].nunique()
+            norm = norm.where(~norm.isin(list(spread[spread >= 4].index)))
         else:
             # Полных тёзок в большом городе много. Одно ФИО — дубликат, только
             # если это тот же город и тот же интервьюер (опросил «знакомого»
@@ -725,6 +784,15 @@ def run(raw_input, cfg):
         own = {i for i, (r, j, _) in dup.items() if r >= strong and df.at[i, "inter"] == df.at[j, "inter"]}
         add(df.index.isin(list(own)), "near_dup", DEFECT, dup_text)
         add(df.index.isin([i for i in dup if i not in own]), "near_dup", qc.get("near_dup_severity", WARNING), dup_text)
+
+    # --- Логика ответов: сначала сказал одно, потом другое (не брак) ----------
+    lg = cfg.get("logic") or {}
+    if lg.get("auto", True):
+        from . import logic
+        found = logic.conflicts(raw_sorted, skip=roles_of(cfg["mapping"]))
+        found = {i: v for i, v in found.items() if df.at[i, "completed"]}
+        add(df.index.isin(list(found)), "logic", lg.get("severity", WARNING),
+            lambda i: "; ".join(found[i][:3]) + (f" (и ещё {len(found[i]) - 3})" if len(found[i]) > 3 else ""))
 
     fast, block_summary = quality.block_times(df, raw_sorted, cfg, qc.get("block_fast_pct", 25))
     add(df.index.isin(list(fast)), "block_fast", qc.get("block_severity", WARNING),

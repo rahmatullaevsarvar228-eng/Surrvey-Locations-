@@ -253,7 +253,7 @@ def result_payload(sess):
         "defect": bool(x.is_defect), "warning": bool(x.is_warning),
         "reasons": x.reason_text, "warnings": x.warning_text,
         "risk": int(x.risk),
-        "technical": bool(x.technical), "rejected": bool(x.rejected), "completed": bool(x.completed), "region": x.region,
+        "technical": bool(x.technical), "rejected": bool(x.rejected), "completed": bool(x.completed), "screenout": bool(getattr(x, "screenout", False)), "region": x.region,
         "date": None if pd.isna(x.start) else x.start.strftime("%Y-%m-%d"),
         "hour": None if pd.isna(x.start) else int(x.start.hour),
         "lat": _clean(x.lat), "lon": _clean(x.lon),
