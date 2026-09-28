@@ -872,10 +872,10 @@ function teamSourcesCard() {
   const email = S.state.server_email;
   const addForm = h("div", { class: "block-card", style: "margin-top:16px" },
     h("div", { class: "form-group-title", style: "margin-top:0" }, "Подключить ещё таблицу"),
-    h("ol", { class: "small muted", style: "margin:0 0 12px;padding-left:18px;line-height:1.7" },
-      h("li", {}, "Откройте Google-таблицу с анкетами → «Настройки доступа»."),
-      h("li", {}, "Добавьте ", email ? h("span", { class: "kbd" }, email) : "адрес сервера (его знает администратор)", " с правом «Читатель»."),
-      h("li", {}, "Вставьте ссылку на таблицу сюда и нажмите «Подключить».")),
+    h("p", { class: "small muted", style: "margin:0 0 12px;line-height:1.7" },
+      "Если Kobo отправляет анкеты в Google-таблицу под почтой ", email ? h("span", { class: "kbd" }, email) : "сервера",
+      " — просто вставьте ссылку на таблицу. Если таблица под другой почтой: в Google Sheets «Настройки доступа» → добавьте ",
+      email ? h("span", { class: "kbd" }, email) : "эту почту", " как «Читатель» (или «Редактор», чтобы туда записывались решения по анкетам)."),
     h("div", { class: "row" }, name, url, sheet,
       h("button", { class: "btn", onclick: async () => {
         await guarded(async () => {
