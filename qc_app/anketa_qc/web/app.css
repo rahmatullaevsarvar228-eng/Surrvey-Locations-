@@ -672,3 +672,17 @@ body.is-admin .menu-pop .admin-only { display: block; }
 .pat-row:hover { background: var(--fill-2); }
 .pat-notes { margin: 4px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
 .pat-notes li { margin: 2px 0; }
+
+/* ── Сводка: «Что сделать сейчас» ─────────────────────────────────────── */
+.todo { display: flex; flex-direction: column; gap: 8px; }
+.todo-row { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 14px 16px;
+  border: 1px solid var(--line, #e3e6ea); border-radius: 12px; background: var(--card, #fff); cursor: pointer; font: inherit; color: inherit; }
+.todo-row:hover { border-color: var(--accent, #0a72e0); background: var(--accent-soft); }
+.todo-ico { font-size: 22px; width: 30px; text-align: center; }
+.todo-t { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.todo-t b { font-size: 16px; }
+.todo-go { font-size: 20px; color: var(--accent, #0a72e0); }
+.stats.big .stat .v { font-size: 40px; }
+details.how { padding: 16px 22px; }
+details.how > summary { cursor: pointer; font-weight: 600; font-size: 16px; }
+details.how[open] > summary { margin-bottom: 12px; }

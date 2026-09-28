@@ -303,6 +303,7 @@ def result_payload(sess):
         "repetition": {"enabled": r["repetition"]["enabled"], "rows": _records(r["repetition"]["rows"])},
         "answers": _records(r["answers"]["all"]),
         "rule_errors": r["rule_errors"],
+        "data_checks": r.get("data_checks") or [],
         "legend": engine.status_legend(cfg),
         "sections": r.get("sections", []),
         "answer_patterns": _clean_deep(r.get("answer_patterns") or []),

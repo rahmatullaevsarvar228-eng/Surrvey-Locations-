@@ -6,7 +6,7 @@
 // ── Состояние анкеты с учётом решения руководителя ──────────────────────────
 const ST = {
   brak: { label: "Брак", icon: "✕", cls: "st-brak" },
-  warn: { label: "Проверить", icon: "!", cls: "st-warn" },
+  warn: { label: "Сомнительно", icon: "!", cls: "st-warn" },
   ok: { label: "Норма", icon: "✓", cls: "st-ok" },
   tech: { label: "Тех. записи", icon: "▶", cls: "st-tech" },
 };
@@ -137,7 +137,7 @@ function dayColumns(anks, onPick) {
         ["ok", "warn", "brak"].map((k) => x[k] ? h("i", { class: `c-${k}`, style: `flex:${x[k]}` }) : null)),
       h("div", { class: "cc-x" }, dayLabel(x.d)));
     hoverable(col, () => [h("div", { class: "tip-h" }, dayLabel(x.d)), tipVal(fmt(x.brak), "брак", "c-brak"),
-      tipVal(fmt(x.warn), "проверить", "c-warn"), tipVal(fmt(x.ok), "норма", "c-ok"), h("div", { class: "muted" }, `всего ${fmt(x.total)}`)]);
+      tipVal(fmt(x.warn), "сомнительно", "c-warn"), tipVal(fmt(x.ok), "норма", "c-ok"), h("div", { class: "muted" }, `всего ${fmt(x.total)}`)]);
     bars.append(col);
   }
   box.append(grid, bars);
@@ -195,6 +195,10 @@ function groupBy(anks, key) {
   }
   return m;
 }
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+}
 function levelOf(p) {
   const st = S.result.status_cfg;
   return p >= st.red_pct ? "RED" : p >= st.yellow_pct ? "YELLOW" : "GREEN";
@@ -234,7 +238,7 @@ function headline(anks) {
   const byInter = [...groupBy(anks.filter((a) => !a.technical), "inter")].map(([k, v]) => [k, pct(v.filter(isBrak).length, v.length)])
     .sort((a, b) => b[1] - a[1]);
   const top = reasonCounts(anks.filter(isBrak), "defect")[0];
-  const title = { RED: "Много брака — нужно вмешаться", YELLOW: "Есть проблемы — стоит проверить", GREEN: "Поле идёт нормально" }[lvl];
+  const title = { RED: "Много брака — нужно вмешаться", YELLOW: "Есть проблемы — стоит посмотреть", GREEN: "Поле идёт нормально" }[lvl];
   const parts = [`Брак ${fmt(p, 1)}% (${fmt(c.brak)} из ${fmt(c.iv)} анкет).`];
   if (c.brak && byCity.length && byCity[0][1] > 0) parts.push(`Больше всего — ${byCity[0][0]} (${fmt(byCity[0][1], 0)}%).`);
   if (top) parts.push(`Главная причина: «${label(top[0])}».`);
@@ -251,49 +255,90 @@ function pageOverview(root) {
   const anks = scoped();
   const c = counts(anks);
   root.append(filterBar("overview"));
+  const dc = dataChecks();
+  if (dc) root.append(dc);
   if (R.rule_errors.length) root.append(h("div", { class: "notice bad" }, h("div", {}, h("b", {}, "Некоторые правила не проверены: "), R.rule_errors.join("; "))));
   root.append(headline(anks));
-  root.append(reconciliation());
 
-  const rv = s.review, q = R.quotas || {};
-  const todo = anks.filter((a) => (a.defect || a.warning) && !a.decision && !a.technical).length;
-  root.append(h("div", { class: "stats" },
-    tile("Анкет", fmt(c.iv), c.tech ? `+ ${fmt(c.tech)} тех. записей (видео/фото)` : s.period || ""),
-    tile("Брак", fmt(c.brak), `${fmt(pct(c.brak, c.iv), 1)}% анкет`, "red", () => go("defects")),
-    tile("Проверить", fmt(c.warn), "сигналы, не брак сами по себе", "yellow", () => { S.reviewFilter = "warn"; go("review"); }),
-    tile("Норма", fmt(c.ok), `${fmt(pct(c.ok, c.iv), 1)}% анкет`, "green"),
-    rv.enabled ? tile("Ждут решения", fmt(todo), "руководителя проекта", "", () => { S.reviewFilter = "todo"; go("review"); }) : null,
-    q.enabled ? tile("План выполнен", `${fmt(q.summary.pct)}%`, `план ${fmt(q.summary.plan)} · добрать ${fmt(q.summary.left)}${q.summary.over ? ` · перебор ${fmt(q.summary.over)}` : ""}`, "", () => go("quotas")) : null));
+  // Четыре главные цифры — одна строка, без лишнего
+  root.append(h("div", { class: "stats big" },
+    tile("Всего анкет", fmt(c.iv), c.tech ? `+ ${fmt(c.tech)} видео/ТЗ (не считаются)` : s.period || ""),
+    tile("Брак", fmt(c.brak), `${fmt(pct(c.brak, c.iv), 1)}% — нажмите, почему`, "red", () => go("defects")),
+    tile("Сомнительно", fmt(c.warn), "не брак, но стоит посмотреть", "yellow", () => { S.reviewFilter = "warn"; go("review"); }),
+    tile("Хорошие", fmt(c.ok), `${fmt(pct(c.ok, c.iv), 1)}% анкет`, "green")));
 
   root.append(h("div", { class: "grid-2 wide-left" },
-    card("Анкеты по дням", "Нажмите на день — все графики покажут только его.",
-      legend([["c-brak", "Брак"], ["c-warn", "Проверить"], ["c-ok", "Норма"]]),
-      dayColumns(scoped().filter((a) => matches(a, "date")), (d) => setFilter("date", F().date === d ? null : d, "overview"))),
+    card("Что сделать сейчас", "Самое важное по проекту. Нажмите на строку — откроется нужный экран.", todoList(anks)),
     lastDayCard()));
 
   root.append(h("div", { class: "grid-2" },
-    card("Главные причины брака", "Сколько анкет с каждой причиной. У анкеты может быть несколько причин. Нажмите — подробности.",
+    card("Почему брак", "Сколько анкет с каждой причиной. Нажмите на причину — подробности.",
       hbars(reasonCounts(anks.filter(isBrak), "defect").map(([code, n]) => ({ label: label(code), value: n, code,
         tip: () => [tipVal(fmt(n), "анкет с браком"), h("div", { class: "muted" }, `${fmt(pct(n, c.brak), 0)}% всего брака`)] })),
-      { color: "c-brak", limit: 7, onClick: (it) => { S.defReason = it.code; go("defects"); }, empty: "Брака нет" })),
-    card("Интервьюеры в зоне риска", "С наибольшей долей брака. Нажмите — откроется карточка интервьюера.",
+      { color: "c-brak", limit: 6, onClick: (it) => { S.defReason = it.code; go("defects"); }, empty: "Брака нет" })),
+    card("Кто работает хуже всех", "Интервьюеры с наибольшей долей брака. Нажмите — карточка интервьюера.",
       riskList(anks))));
 
-  const cities = [...groupBy(anks.filter((a) => !a.technical), "city")].map(([city, v]) => {
-    const cc = counts(v);
-    return { label: city, sub: v[0].region !== city ? v[0].region : "", value: pct(cc.brak, cc.iv), n: cc.iv, cc, active: F().city === city };
-  }).sort((a, b) => b.value - a.value);
   root.append(h("div", { class: "grid-2" },
-    card("Брак по городам", "Доля брака среди анкет города. Нажмите на город, чтобы отфильтровать.",
-      cityBars(cities)),
-    card("Отчёты и история", "Отчёт Word строится по выбранным фильтрам. Волна сохраняет итоги по интервьюерам на этом компьютере — видно, кто несколько волн подряд в красной или жёлтой зоне.",
-      h("div", { class: "row", style: "flex-wrap:wrap;margin-bottom:14px" },
-        h("button", { class: "btn primary", onclick: () => exportReport("word") }, "Отчёт Word"),
-        h("button", { class: "btn", onclick: () => exportReport("client") }, "Для заказчика (Excel)"),
-        h("button", { class: "btn", onclick: () => exportReport("clean") }, "Чистая база"),
-        h("button", { class: "btn", onclick: () => exportReport("full") }, "Полный Excel")),
-      saveWave())));
+    card("Анкеты по дням", "Нажмите на день — все экраны покажут только его.",
+      legend([["c-brak", "Брак"], ["c-warn", "Сомнительно"], ["c-ok", "Хорошие"]]),
+      dayColumns(scoped().filter((a) => matches(a, "date")), (d) => setFilter("date", F().date === d ? null : d, "overview"))),
+    card("Брак по городам", "Доля брака среди анкет города. Нажмите на город, чтобы смотреть только его.",
+      cityBars([...groupBy(anks.filter((a) => !a.technical), "city")].map(([city, v]) => {
+        const cc = counts(v);
+        return { label: city, sub: v[0].region !== city ? v[0].region : "", value: pct(cc.brak, cc.iv), n: cc.iv, cc, active: F().city === city };
+      }).sort((a, b) => b.value - a.value)))));
+
+  root.append(h("details", { class: "card how" },
+    h("summary", {}, "Как посчитано и отчёты"),
+    reconciliation(),
+    h("div", { class: "row", style: "flex-wrap:wrap;margin:14px 0" },
+      h("button", { class: "btn primary", onclick: () => exportReport("word") }, "Отчёт Word"),
+      h("button", { class: "btn", onclick: () => exportReport("client") }, "Для заказчика (Excel)"),
+      h("button", { class: "btn", onclick: () => exportReport("clean") }, "Чистая база"),
+      h("button", { class: "btn", onclick: () => exportReport("full") }, "Полный Excel")),
+    saveWave()));
 }
+
+// Проблемы в самих данных: без них пользователь видит «0 брака» и думает,
+// что всё хорошо, хотя проверки времени или GPS просто не работали.
+function dataChecks() {
+  const list = (S.result.data_checks || []).filter((x) => x.level !== "info");
+  if (!list.length) return null;
+  const bad = list.some((x) => x.level === "bad");
+  return h("div", { class: `notice ${bad ? "bad" : "warn"}` },
+    h("div", { style: "flex:1" },
+      h("b", {}, bad ? "Не все проверки сработали — проверьте колонки" : "Обратите внимание на данные"),
+      h("ul", { style: "margin:6px 0 0;padding-left:18px" }, list.map((x) => h("li", {}, x.text)))),
+    S.state.user && ["lead", "admin"].includes(S.state.user.role)
+      ? h("button", { class: "btn", onclick: () => openSetup(list[0].setup || "columns") }, "Исправить") : null);
+}
+
+// «Что сделать сейчас» — готовые действия вместо графиков
+function todoList(anks) {
+  const s = S.result.summary, rv = s.review;
+  const items = [];
+  const todo = anks.filter((a) => (a.defect || a.warning) && !a.decision && !a.technical && !a.rejected).length;
+  if (rv.enabled && todo) items.push(["⚖️", `${fmt(todo)} анкет ждут вашего решения`, "Брак, принять или на перезвон", () => { S.reviewFilter = "todo"; go("review"); }]);
+  const red = [...groupBy(anks.filter((a) => !a.technical), "inter")].filter(([, v]) => levelOf(pct(counts(v).brak, counts(v).iv)) === "RED").map(([k]) => k);
+  if (red.length) items.push(["🔴", `${red.length} ${plural(red.length, "интервьюер", "интервьюера", "интервьюеров")} в красной зоне`, red.slice(0, 4).join(", ") + (red.length > 4 ? "…" : ""), () => go("interviewers")]);
+  const { days, rows, norm } = dailyData(S.result.anketas.filter((a) => matches(a, "date")));
+  if (days.length) {
+    const k = days.length - 1;
+    const off = rows.filter((r) => !r.cells[k].n).length;
+    const low = rows.filter((r) => r.cells[k].st === "low").length;
+    if (off) items.push(["📵", `${off} не прислали анкет ${dayLabel(days[k])}`, "Позвонить и узнать причину", () => go("daily")]);
+    if (norm && low) items.push(["📉", `${low} ниже нормы ${dayLabel(days[k])}`, `Норма — ${norm} хороших анкет в день`, () => go("daily")]);
+    if (!norm) items.push(["🎯", "Норма в день не задана", "Задайте, чтобы видеть, кто её не выполняет", () => go("daily")]);
+  }
+  const top = reasonCounts(anks.filter(isBrak), "defect")[0];
+  if (top) items.push(["💬", `Главная причина брака: «${label(top[0])}»`, `${fmt(top[1])} анкет — обсудите на инструктаже`, () => { S.defReason = top[0]; go("defects"); }]);
+  if (!items.length) return h("div", { class: "empty small" }, "Всё в порядке — срочных дел нет");
+  return h("div", { class: "todo" }, items.map(([ico, title, sub, fn]) =>
+    h("button", { class: "todo-row", onclick: fn }, h("span", { class: "todo-ico" }, ico),
+      h("span", { class: "todo-t" }, h("b", {}, title), h("span", { class: "muted small" }, sub)), h("span", { class: "todo-go" }, "→"))));
+}
+
 // Последний день: кто работал, кто выполнил норму, кто нет.
 function lastDayCard() {
   const { norm, days, rows } = dailyData(S.result.anketas.filter((a) => matches(a, "date")));
@@ -317,7 +362,7 @@ function lastDayCard() {
 
 function cityBars(cities) {
   return hbars(cities.map((x) => ({ ...x, tip: () => [h("div", { class: "tip-h" }, x.label),
-    tipVal(fmt(x.cc.brak), "брак", "c-brak"), tipVal(fmt(x.cc.warn), "проверить", "c-warn"), tipVal(fmt(x.cc.ok), "норма", "c-ok")] })),
+    tipVal(fmt(x.cc.brak), "брак", "c-brak"), tipVal(fmt(x.cc.warn), "сомнительно", "c-warn"), tipVal(fmt(x.cc.ok), "норма", "c-ok")] })),
   { color: "c-brak", max: 100, limit: 10, fmtVal: (it) => `${fmt(it.value, 0)}% · ${fmt(it.n)}`,
     onClick: (it) => setFilter("city", F().city === it.label ? null : it.label, S.page) });
 }
@@ -332,7 +377,7 @@ function riskList(anks) {
   return h("div", { class: "risk-list" }, rows.map((r) => h("div", { class: "risk-row clickable", onclick: () => showInterviewer(r.inter) },
     pill(r.lvl), h("div", { class: "rl-name" }, h("b", {}, r.inter), h("span", { class: "muted small" }, ` · ${r.city}`),
       r.top ? h("div", { class: "muted small" }, r.top) : null),
-    h("div", { class: "rl-bar" }, stackBar([{ value: r.cc.brak, color: "c-brak", label: "брак" }, { value: r.cc.warn, color: "c-warn", label: "проверить" },
+    h("div", { class: "rl-bar" }, stackBar([{ value: r.cc.brak, color: "c-brak", label: "брак" }, { value: r.cc.warn, color: "c-warn", label: "сомнительно" },
       { value: r.cc.ok, color: "c-ok", label: "норма" }])),
     h("div", { class: "rl-val" }, `${fmt(r.p, 0)}%`))));
 }
@@ -357,7 +402,7 @@ function pageDefects(root) {
   root.append(h("div", { class: "row", style: "margin-bottom:14px" },
     h("div", { class: "segmented" },
       h("button", { class: sev === "defect" ? "on" : "", onclick: () => { S.defSev = "defect"; S.defReason = null; go("defects"); } }, `Брак · ${fmt(c.brak)}`),
-      h("button", { class: sev === "warning" ? "on" : "", onclick: () => { S.defSev = "warning"; S.defReason = null; go("defects"); } }, `Проверить · ${fmt(c.warn)}`)),
+      h("button", { class: sev === "warning" ? "on" : "", onclick: () => { S.defSev = "warning"; S.defReason = null; go("defects"); } }, `Сомнительно · ${fmt(c.warn)}`)),
     reason ? h("span", { class: "chip-on" }, "Причина: ", h("b", {}, label(reason)), h("button", { title: "Снять", onclick: () => { S.defReason = null; go("defects"); } }, "×")) : null,
     h("span", { class: "spacer" }),
     h("span", { class: "muted small" }, sev === "defect" ? "С учётом решений руководителя: «Принять» убирает из брака, «Брак» добавляет." : "Сигналы для ручной проверки — сами по себе не брак.")));
@@ -454,7 +499,7 @@ function pageInterviewers(root) {
     const p = pct(cc.brak, cc.iv);
     const top = reasonCounts(v.filter(isBrak), "defect").slice(0, 2).map(([code, n]) => `${label(code)} ×${n}`).join(", ");
     return { "Интервьюер": inter, "Город": v[0].city, "Регион": v[0].region, "Анкет": cc.iv, "Тех.": cc.tech, "Брак": cc.brak,
-      "Проверить": cc.warn, "% брака": Math.round(p * 10) / 10, "Статус": levelOf(p), cc,
+      "Сомнительно": cc.warn, "% брака": Math.round(p * 10) / 10, "Статус": levelOf(p), cc,
       "Риск": v.length ? Math.round(v.reduce((x, a) => x + a.risk, 0) / v.length) : 0, "Главные причины": top };
   });
   const sc = { RED: 0, YELLOW: 0, GREEN: 0 };
@@ -469,13 +514,13 @@ function pageInterviewers(root) {
     h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Все интервьюеры"),
       h("p", { class: "hint" }, "Полоса — состав его анкет: брак, проверить, норма. Нажмите на строку — карточка интервьюера: причины, дни, маршрут, анкеты.")),
       h("button", { class: "btn small", onclick: () => exportReport("interviewers") }, "Excel")),
-    legend([["c-brak", "Брак"], ["c-warn", "Проверить"], ["c-ok", "Норма"]]),
+    legend([["c-brak", "Брак"], ["c-warn", "Сомнительно"], ["c-ok", "Норма"]]),
     table([
       { key: "Статус", label: "Статус", render: (r) => pill(r["Статус"]), sortVal: (r) => ({ RED: 3, YELLOW: 2, GREEN: 1 })[r["Статус"]] },
       { key: "Интервьюер", label: "Интервьюер" }, { key: "Город", label: "Город" },
       { key: "Анкет", label: "Анкет", num: true },
       { key: "bar", label: "Состав анкет", sortVal: (r) => r["% брака"], render: (r) => h("div", { class: "cell-stack" },
-        stackBar([{ value: r.cc.brak, color: "c-brak", label: "брак" }, { value: r.cc.warn, color: "c-warn", label: "проверить" }, { value: r.cc.ok, color: "c-ok", label: "норма" }])) },
+        stackBar([{ value: r.cc.brak, color: "c-brak", label: "брак" }, { value: r.cc.warn, color: "c-warn", label: "сомнительно" }, { value: r.cc.ok, color: "c-ok", label: "норма" }])) },
       { key: "% брака", label: "% брака", num: true, digits: 1 },
       { key: "Риск", label: "Риск", num: true, render: (r) => riskTag(r["Риск"]) },
       { key: "Главные причины", label: "Главные причины брака", wrap: true },
@@ -500,10 +545,10 @@ function showInterviewer(inter) {
     h("div", { class: "stats" },
       tile("Статус", pill(levelOf(p)), `${fmt(p, 1)}% брака`),
       tile("Анкет", fmt(cc.iv), cc.tech ? `+ ${fmt(cc.tech)} тех. записей` : [...new Set(all.map((a) => a.city))].join(", ")),
-      tile("Брак", fmt(cc.brak), "", "red"), tile("Проверить", fmt(cc.warn), "", "yellow")),
+      tile("Брак", fmt(cc.brak), "", "red"), tile("Сомнительно", fmt(cc.warn), "", "yellow")),
     h("div", { class: "grid-2" },
       card("Почему брак", null, hbars(reasonCounts(all.filter(isBrak), "defect").map(([code, n]) => ({ label: label(code), value: n })), { color: "c-brak", empty: "Брака нет" })),
-      card("По дням", null, legend([["c-brak", "Брак"], ["c-warn", "Проверить"], ["c-ok", "Норма"]]), dayColumns(all))),
+      card("По дням", null, legend([["c-brak", "Брак"], ["c-warn", "Сомнительно"], ["c-ok", "Норма"]]), dayColumns(all))),
     ((S.result.answer_patterns || []).find((p) => p.inter === inter) || null) ? card("Необычные ответы его респондентов", "По сравнению с остальными интервьюерами.",
       h("ul", { class: "pat-notes" }, S.result.answer_patterns.find((p) => p.inter === inter).notes.map((t) => h("li", {}, t)))) : null,
     all.some((a) => a.lat != null) ? card("Маршрут", "Анкеты по времени; линия — порядок в течение дня.", miniMap(all, null, true)) : null,
@@ -833,7 +878,7 @@ function reconciliation() {
   const ti = s.technical_info;
   const parts = [
     ["строк в таблице", s.source_rows],
-    s.dropped ? ["пропущено (нет города или интервьюера)", -s.dropped] : null,
+    s.dropped ? ["пропущено (нет интервьюера и телефона)", -s.dropped] : null,
     c.tech ? ["технические записи (видео/фото)", -c.tech] : null,
   ].filter(Boolean);
   const ok = c.brak + c.warn + c.ok === c.iv && s.source_rows - s.dropped - c.tech === c.iv;
@@ -842,7 +887,7 @@ function reconciliation() {
     parts.map(([t, n], i) => h("span", {}, i ? (n < 0 ? " − " : " + ") : "", h("b", {}, fmt(Math.abs(n))), ` ${t}`)),
     " = ", h("b", {}, fmt(c.iv)), " анкет = ",
     h("span", { class: "t-brak" }, fmt(c.brak)), " брак",
-    s.rejected ? h("span", { class: "muted" }, ` (из них ${fmt(s.rejected)} — отмечены мониторингом)`) : null, " + ", h("span", { class: "t-warnx" }, fmt(c.warn)), " проверить + ",
+    s.rejected ? h("span", { class: "muted" }, ` (из них ${fmt(s.rejected)} — отмечены мониторингом)`) : null, " + ", h("span", { class: "t-warnx" }, fmt(c.warn)), " сомнительно + ",
     h("span", { class: "t-okx" }, fmt(c.ok)), " норма.",
     ti ? h("span", { class: "muted" }, ` Технические записи ${ti.auto ? "найдены автоматически" : "заданы"} по колонке «${ti.col}».`) : null,
     s.rejected_info ? h("span", { class: "muted" }, ` Брак мониторинга — колонка «${s.rejected_info.col}», не перепроверяется.`) : null,

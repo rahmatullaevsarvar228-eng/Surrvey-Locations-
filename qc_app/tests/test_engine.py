@@ -547,3 +547,56 @@ def test_no_false_alarms_on_real_kobo_like_columns(cfg):
     assert not df["rejected"].any()                         # «Брак зарегистрирован» 1/0 — ответ, не отметка
     assert not df["issues"].map(lambda xs: any(c == "near_dup" for c, _, _ in xs)).any()
     assert not res["answer_patterns"]
+
+
+def test_day_first_dates_from_google_sheets():
+    """«05.09.2025» — 5 сентября, а не 9 мая: иначе анкеты одного дня
+    разъезжаются по разным датам, и перерывы/наложения не ловятся."""
+    s = pd.Series(["05.09.2025 10:00:00", "05.09.2025 10:20:00", "12.09.2025 11:00", "13.09.2025 9:00:00"])
+    got = engine.parse_datetime(s)
+    assert list(got.dt.month) == [9, 9, 9, 9] and list(got.dt.day) == [5, 5, 12, 13]
+    us = engine.parse_datetime(pd.Series(["9/5/2025 10:00:00", "9/15/2025 1:05:00 PM"]))
+    assert list(us.dt.day) == [5, 15] and us.iloc[1].hour == 13
+    excel = engine.parse_datetime(pd.Series([45915.5, "2025-09-15T13:53:12.000+05:00", "мусор", 42]))
+    assert excel.iloc[0] == pd.Timestamp("2025-09-15 12:00") and excel.iloc[1].hour == 13
+    assert excel.iloc[2:].isna().all()
+
+
+def test_short_patterns_match_whole_words_only():
+    cols = ["Gender", "Recommend bank", "Electricity", "internet usage", "Interviewer name",
+            "start", "end", "City", "Код интервьюера"]
+    m = config.suggest_mapping(cols)
+    assert m["end"] == "end" and m["start"] == "start" and m["city"] == "City"
+    assert m["inter"] == "Код интервьюера" and m["name"] is None
+    m = config.suggest_mapping(["Gender", "Recommend", "Time start"])
+    assert m["end"] is None and m["start"] == "Time start"
+
+
+def test_brak_found_without_deviceid_and_with_text_dates(cfg):
+    """Выгрузка из Google Sheets без deviceid и с датами «дд.мм.гггг»:
+    брак по перерыву и длительности всё равно находится, анкета без
+    города не теряется, а проблемы данных видны."""
+    rows = []
+    for i, (st, mins) in enumerate([("05.09.2025 10:00:00", 12), ("05.09.2025 10:12:30", 3), ("05.09.2025 11:00:00", 12)]):
+        s = pd.Timestamp(2025, 9, 5, *map(int, st.split()[1].split(":")))
+        rows.append({"_id": i + 1, "Код интервьюера": "A", "Город": "Ташкент" if i < 2 else None,
+                     "start": st, "end": (s + pd.Timedelta(minutes=mins)).strftime("%d.%m.%Y %H:%M:%S")})
+    raw = pd.DataFrame(rows)
+    c = config.default_config()
+    c["mapping"] = config.suggest_mapping(list(raw.columns))
+    assert c["mapping"]["device"] is None and not config.missing_required(c["mapping"])
+    r = engine.run(raw, c)
+    df = r["df"].set_index("row_id")
+    codes = {k: {x[0] for x in v} for k, v in df["issues"].items()}
+    assert {"no_rest", "too_short"} <= codes["2"], codes
+    assert len(df) == 3 and df.loc["3", "city"] == "Город не указан"
+    texts = " ".join(x["text"] for x in r["data_checks"])
+    assert "Device ID" in texts and "GPS" in texts
+
+
+def test_data_checks_warn_when_time_not_read(cfg):
+    rows = [make_row(i, "D1", "A", f"2025-09-01 1{i}:00", 10) for i in range(6)]
+    raw = pd.DataFrame(rows)
+    raw["start"] = "не время"
+    r = engine.run(raw, cfg)
+    assert any(x["level"] == "bad" and "старта" in x["text"] for x in r["data_checks"])

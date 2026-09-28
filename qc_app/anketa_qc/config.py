@@ -5,11 +5,13 @@
 Настройки — обычный JSON-совместимый dict: так их легко сохранить в SQLite,
 передать в интерфейс и обратно без отдельной схемы сериализации.
 """
+import re
 import copy
 
 # Роли колонок. required=True — без неё проверки не запускаются.
 ROLES = [
-    dict(key="device", label="Device ID", required=True,
+    # Нет Device ID — цепочка по времени строится по интервьюеру
+    dict(key="device", label="Device ID (телефон)", required=False,
          patterns=["deviceid", "device_id", "device id", "imei"]),
     dict(key="start", label="Старт анкеты", required=True,
          patterns=["start", "начало", "boshlanish"]),
@@ -24,7 +26,7 @@ ROLES = [
     dict(key="phone", label="Телефон респондента", required=False,
          patterns=["телефон", "phone", "telefon"]),
     dict(key="name", label="ФИО респондента", required=False,
-         patterns=["как вас зовут", "фио", "имя респондента", "ismingiz", "name"]),
+         patterns=["как вас зовут", "фио", "имя респондента", "ismingiz", "respondent name", "имя"]),
     dict(key="lat", label="GPS: широта", required=False,
          patterns=["_latitude", "latitude", "широта", "kenglik"]),
     dict(key="lon", label="GPS: долгота", required=False,
@@ -152,15 +154,27 @@ def merge_config(saved):
     return cfg
 
 
+def _tokens(text):
+    return [t for t in re.split(r"[^0-9a-zа-яёʻ'ғқҳў]+", text) if t]
+
+
 def smart_default(columns, patterns):
-    lowered = [(c, str(c).lower()) for c in columns]
+    """Точное совпадение названия; затем длинный образец внутри названия
+    («код интервьюера» в «Код интервьюера (2 цифры)»); короткий («end»,
+    «start», «inter», «city») — только целым словом, иначе «end» найдётся в
+    «Gender» или «Recommend», а «city» — в «Electricity»."""
+    lowered = [(c, str(c).strip().lower()) for c in columns]
     for p in patterns:
         for c, cl in lowered:
             if cl == p:
                 return c
     for c, cl in lowered:
+        toks = _tokens(cl)
         for p in patterns:
-            if p in cl:
+            if len(p.strip("_ ")) <= 5:
+                if p.strip("_ ") in toks:
+                    return c
+            elif p in cl:
                 return c
     return None
 

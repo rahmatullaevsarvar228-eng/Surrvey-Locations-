@@ -281,6 +281,9 @@ function renderSidebar() {
   sel.replaceChildren(...S.state.projects.map((p) => h("option", { value: p, selected: p === S.state.project }, p)));
   document.querySelectorAll("#nav a.needs-result").forEach((a) => a.classList.toggle("disabled", !S.result));
   document.querySelectorAll(".needs-result-btn").forEach((b) => { b.disabled = !S.result; });
+  // Квоты — только если план задан: лишняя вкладка только путает
+  const qa = document.querySelector('#nav a[data-page="quotas"]');
+  if (qa) qa.hidden = !(S.result && S.result.quotas && S.result.quotas.enabled);
   $("#exportBtn").disabled = !S.result;
   $("#wordBtn").disabled = !S.result;
   const rv = S.result && S.result.summary.review;
@@ -1191,7 +1194,7 @@ function reviewFilters(rv) {
   const f = {
     todo: ["Нужно решить", (a) => (a.defect || a.warning) && !a.decision && !a.technical && !a.rejected],
     brak: ["Брак", (a) => st(a) === "brak"],
-    warn: ["Проверить", (a) => st(a) === "warn"],
+    warn: ["Сомнительно", (a) => st(a) === "warn"],
     ok: ["Норма", (a) => st(a) === "ok"],
     call: ["На прозвон", (a) => backcheck().has(a.pos)],
     listen: ["На прослушку", (a) => !!a.listen],
@@ -1328,7 +1331,7 @@ async function openAnketa(pos) {
     decideBox,
     h("h3", {}, d.issues.length ? "Почему система отметила анкету" : "Замечаний нет"),
     h("ul", { class: "why" }, d.issues.map((i) => h("li", { class: i.severity },
-      h("span", { class: `pill ${i.severity === "defect" ? "RED" : "YELLOW"}` }, i.severity === "defect" ? "Брак" : "Проверить"),
+      h("span", { class: `pill ${i.severity === "defect" ? "RED" : "YELLOW"}` }, i.severity === "defect" ? "Брак" : "Сомнительно"),
       h("div", { class: "t" }, i.label, h("span", { class: "blk" }, `Блок: ${i.block}`)),
       h("div", {}, i.text),
       h("div", { class: "l" }, "Логика: ", i.logic),

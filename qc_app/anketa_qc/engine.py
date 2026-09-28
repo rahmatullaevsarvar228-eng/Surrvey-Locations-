@@ -161,10 +161,33 @@ def status_legend(cfg):
 _TZ_SUFFIX = re.compile(r"(Z|[+-]\d{2}:?\d{2})$")
 
 
+_DMY = re.compile(r"^\s*(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b")
+
+
+def _day_first(values):
+    """Как читать «05.09.2025»: день.месяц или месяц/день. Решаем по всей
+    колонке: если где-то первое число > 12 — это день; если второе > 12 —
+    месяц/день (американский вид Google Sheets). Иначе с точкой — день первым
+    (так пишут в Узбекистане и России), со слешем — тоже день первым."""
+    first = second = 0
+    for v in values:
+        m = _DMY.match(v)
+        if m:
+            first = max(first, int(m.group(1)))
+            second = max(second, int(m.group(2)))
+    if first > 12:
+        return True
+    if second > 12:
+        return False
+    return True
+
+
 def parse_datetime(series):
     """Время как его видел интервьюер (локальное). Kobo пишет «…+05:00»:
     отрезаем смещение, а не переводим в UTC, иначе проверка «ночных» анкет
     сдвинется на 5 часов. Для интервалов результат тот же.
+    Понимает ISO (Kobo), «15.09.2025 13:53» (день первым), «9/15/2025 1:53 PM»
+    (Google Sheets по-американски) и числа-даты Excel (45915,58).
     Только pandas — без np.datetime64(pd.Timestamp(...)), который падает на
     части версий numpy/pandas под Windows."""
     def _strip(v):
@@ -173,10 +196,31 @@ def parse_datetime(series):
         if isinstance(v, pd.Timestamp) and v.tzinfo is not None:
             return v.tz_localize(None)
         return v
-    parsed = pd.to_datetime(series.map(_strip), errors="coerce", format="mixed")
-    if getattr(parsed.dt, "tz", None) is not None:
-        parsed = parsed.dt.tz_localize(None)
-    return parsed
+    series = series.map(_strip)
+    out = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+
+    # Excel хранит дату числом дней от 30.12.1899 (45915,5 = 15.09.2025 12:00)
+    num = pd.to_numeric(series, errors="coerce")
+    serial = num.between(20000, 80000)
+    if serial.any():
+        out[serial] = pd.Timestamp("1899-12-30") + pd.to_timedelta(num[serial], unit="D")
+
+    rest = ~serial & series.notna()
+    if rest.any():
+        vals = series[rest]
+        texts = vals[vals.map(lambda v: isinstance(v, str))]
+        dmy = texts[texts.map(lambda v: bool(_DMY.match(v)))]
+        other = vals.drop(dmy.index)
+        if len(dmy):
+            out[dmy.index] = pd.to_datetime(dmy, errors="coerce", dayfirst=_day_first(dmy), format="mixed")
+        if len(other):
+            parsed = pd.to_datetime(other, errors="coerce", format="mixed")
+            if getattr(parsed.dt, "tz", None) is not None:
+                parsed = parsed.dt.tz_localize(None)
+            out[other.index] = parsed
+    # числа вне диапазона дат (секунды, мусор) — не время
+    out[(out < pd.Timestamp("2000-01-01")) | (out > pd.Timestamp("2100-01-01"))] = pd.NaT
+    return out
 
 
 def clean_str(v):
@@ -214,11 +258,14 @@ def prepare(raw, cfg):
         df["row_id"] = raw[m["id"]].map(clean_str).fillna("—")
     else:
         df["row_id"] = "стр. " + (raw.index + 2).astype(str)   # номер строки в Excel
-    df["deviceid"] = raw[m["device"]].map(clean_str)
+    df["inter"] = raw[m["inter"]].map(clean_str)
+    # Без Device ID анкеты идут цепочкой по интервьюеру (один интервьюер —
+    # один телефон): перерывы, наложения и массовое открытие всё равно ловятся.
+    df["deviceid"] = raw[m["device"]].map(clean_str) if m.get("device") else "inter:" + df["inter"].fillna("")
+    df.loc[df["deviceid"] == "inter:", "deviceid"] = None
     df["start"] = parse_datetime(raw[m["start"]])
     df["end"] = parse_datetime(raw[m["end"]])
     df["city"] = raw[m["city"]].map(normalize_city)
-    df["inter"] = raw[m["inter"]].map(clean_str)
     df["phone"] = raw[m["phone"]].map(clean_str) if m.get("phone") else None
     df["resp_name"] = raw[m["name"]].map(clean_str) if m.get("name") else None
     if m.get("lat"):
@@ -245,7 +292,9 @@ def prepare(raw, cfg):
 
     # Техническое задание нужно в цепочке по времени на устройстве, даже если
     # в его форме нет города (отдельная форма «ТЗ»).
-    keep = (df["deviceid"].notna() | df["inter"].notna()) & (df["city"].notna() | df["technical"])
+    # Анкета без города не пропадает: город «не указан», остальные проверки идут.
+    df.loc[df["city"].isna() & ~df["technical"], "city"] = "Город не указан"
+    keep = df["deviceid"].notna() | df["inter"].notna()
     n_dropped = int((~keep).sum())
     df = df[keep].copy()
     raw = raw.loc[df.index].reset_index(drop=True)
@@ -708,6 +757,7 @@ def run(raw_input, cfg):
         "df": df,
         "raw": raw,
         "n_dropped": n_dropped,
+        "data_checks": data_checks(df, raw, cfg, geo_result),
         "city_issues": city_issues,
         "rule_errors": rule_errors,
         "wave_median": wave_median,
@@ -725,6 +775,57 @@ def run(raw_input, cfg):
         # (урок из main.py: копия на каждой строке роняла приложение по памяти).
         "answers": answers,
     }
+
+
+def data_checks(df, raw, cfg, geo_result):
+    """Что в данных мешает проверке — простыми словами. Без этого на экране
+    просто «0 брака», и не видно, что проверки времени или GPS не работали."""
+    m = cfg["mapping"]
+    iv = df[~df["technical"] & ~df["rejected"]]
+    n = len(iv)
+    out = []
+    if not n:
+        return out
+
+    def share(mask):
+        return int(mask.sum()), round(float(mask.mean()) * 100)
+
+    for key, label in (("start", "старта"), ("end", "финиша")):
+        bad, pct = share(iv[key].isna())
+        if pct >= 10:
+            out.append({"level": "bad", "setup": "columns",
+                        "text": f"Время {label} не прочитано у {bad} анкет из {n} (колонка «{m.get(key)}»). "
+                                "Для них не работали проверки длительности и перерывов. "
+                                "Проверьте, та ли колонка выбрана."})
+    dur = iv["duration_min"].dropna()
+    if len(dur) >= 10:
+        neg = int((dur < 0).sum())
+        if neg / len(dur) >= 0.1:
+            out.append({"level": "bad", "setup": "columns",
+                        "text": f"У {neg} анкет финиш раньше старта — похоже, колонки «Старт» и «Финиш» перепутаны."})
+        elif dur.median() > 24 * 60:
+            out.append({"level": "bad", "setup": "columns",
+                        "text": "Анкеты длятся больше суток — похоже, выбраны не те колонки старта и финиша."})
+    if not m.get("device"):
+        out.append({"level": "info", "setup": "columns",
+                    "text": "Нет колонки Device ID — перерывы между анкетами считаются по интервьюеру."})
+    no_inter, pct = share(iv["inter"].isna())
+    if pct >= 5:
+        out.append({"level": "bad", "setup": "columns",
+                    "text": f"У {no_inter} анкет не указан интервьюер (колонка «{m.get('inter')}»)."})
+    no_city, pct = share(iv["city"] == "Город не указан")
+    if pct >= 5:
+        out.append({"level": "warn", "setup": "columns",
+                    "text": f"У {no_city} анкет не указан город (колонка «{m.get('city')}») — проверка «в своём ли городе» для них не работала."})
+    if not m.get("lat"):
+        out.append({"level": "warn", "setup": "columns",
+                    "text": "Не выбрана колонка GPS — проверки места (город, точки, одинаковые координаты) не работали."})
+    elif n:
+        no_gps, pct = share(iv["lat"].isna())
+        if pct >= 30:
+            out.append({"level": "warn", "setup": "gps",
+                        "text": f"У {no_gps} анкет из {n} нет координат GPS — место для них не проверено."})
+    return out
 
 
 def tech_info_of(df):
