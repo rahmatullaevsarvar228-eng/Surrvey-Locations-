@@ -80,8 +80,6 @@ def selftest():
     ok = ok and client.get("/web/vendor/leaflet/leaflet.js").status_code == 200
     from . import geo
     ok = ok and len(geo.default_plan()) > 0
-    from .server import connector_path
-    ok = ok and connector_path() is not None   # код личного коннектора для руководителей
     # Загружаем ту же оконную часть, что и при обычном запуске (на Windows это
     # .NET через pythonnet) — именно она падала у файлов из скачанного zip.
     unblock_bundle()

@@ -838,7 +838,7 @@ function teamSourcesCard() {
     h("input", { type: "checkbox", checked: chosen.has(src.id), onchange: (e) => { e.target.checked ? chosen.add(src.id) : chosen.delete(src.id); } }),
     h("div", {}, h("div", {}, h("b", {}, src.name), " ", src.project ? h("span", { class: "tag" }, src.project) : null,
       S.state.user.role === "admin" && src.team ? [" ", h("span", { class: "tag" }, `команда ${src.team}`)] : null),
-      h("div", { class: "meta" }, [src.added_by && `добавил ${src.added_by}`, src.via ? `через почту руководителя ${src.via}` : "через аккаунт сервера"].filter(Boolean).join(" · "))),
+      h("div", { class: "meta" }, [src.added_by && `добавил ${src.added_by}`].filter(Boolean).join(" · "))),
     tabPicker(src),
     h("label", { class: "check small", title: "Отметьте, если в этой таблице только технические задания (видео, фото), а не интервью", onclick: (e) => e.stopPropagation() },
       h("input", { type: "checkbox", checked: (cfg().tech_sources || []).includes(src.id), onchange: async (e) => {
@@ -870,22 +870,18 @@ function teamSourcesCard() {
   const url = h("input", { type: "url", placeholder: "https://docs.google.com/spreadsheets/d/…", style: "flex:2;min-width:260px" });
   const sheet = h("input", { type: "text", placeholder: "Лист (необязательно)", style: "width:170px" });
   const email = S.state.server_email;
-  const bridge = S.state.bridge;
-  // по умолчанию — через свою почту, если коннектор подключён
-  const via = h("select", {},
-    h("option", { value: "bridge", selected: !!bridge, disabled: !bridge }, bridge ? `через мою почту ${bridge.email}` : "через мою почту (сначала подключите её выше)"),
-    h("option", { value: "", selected: !bridge }, "через аккаунт сервера"));
   const addForm = h("div", { class: "block-card", style: "margin-top:16px" },
-    h("div", { class: "form-group-title", style: "margin-top:0" }, "Подключить таблицу"),
-    h("p", { class: "small muted", style: "margin:0 0 10px;line-height:1.6" },
-      bridge ? "Вставьте ссылку на любую Google-таблицу, которую вы видите под своей почтой (например, куда Kobo отправляет анкеты). Доступ никому давать не нужно."
-        : ["Без своей почты: откройте таблицу → «Настройки доступа» → добавьте ", email ? h("span", { class: "kbd" }, email) : "адрес сервера", " как «Читатель». Проще — подключите свою почту выше."]),
-    h("div", { class: "row" }, name, url, sheet, via,
+    h("div", { class: "form-group-title", style: "margin-top:0" }, "Подключить ещё таблицу"),
+    h("ol", { class: "small muted", style: "margin:0 0 12px;padding-left:18px;line-height:1.7" },
+      h("li", {}, "Откройте Google-таблицу с анкетами → «Настройки доступа»."),
+      h("li", {}, "Добавьте ", email ? h("span", { class: "kbd" }, email) : "адрес сервера (его знает администратор)", " с правом «Читатель»."),
+      h("li", {}, "Вставьте ссылку на таблицу сюда и нажмите «Подключить».")),
+    h("div", { class: "row" }, name, url, sheet,
       h("button", { class: "btn", onclick: async () => {
         await guarded(async () => {
           // название необязательно — сервер требует его, подставим своё
           const title = name.value.trim() || `${S.state.project} — таблица ${all.length + 1}`;
-          S.state.remote_sources = await POST("/api/remote/sources/add", { name: title, url: url.value, sheet: sheet.value, via: via.value });
+          S.state.remote_sources = await POST("/api/remote/sources/add", { name: title, url: url.value, sheet: sheet.value });
           const added = S.state.remote_sources.find((x) => x.name === title) || S.state.remote_sources[S.state.remote_sources.length - 1];
           if (added) { const cc = cfg(); cc.remote_sources = [...new Set([...(cc.remote_sources || []), added.id])]; await flushConfig(); }
           toast("Таблица подключена — проверяю анкеты");
@@ -908,64 +904,7 @@ function teamSourcesCard() {
       h("button", { class: "btn primary", onclick: () => load(true) }, svg('<path d="M6.5 4.5v11l9-5.5z"/>'), "Проверить отмеченные таблицы")) : null,
     h("div", { class: "form-list", style: "margin-top:16px" },
       formRow("Автоматическая проверка", "Приложение само забирает новые анкеты из отмеченных таблиц и перепроверяет всё, пока открыто", h("div", { class: "row" }, live, freq))),
-    bridgeCard(), addForm);
-}
-
-// ── Моя почта (личный коннектор руководителя) ──────────────────────────────
-// Руководитель один раз ставит коннектор в своём Google-аккаунте — и
-// подключает любые свои таблицы по ссылке, ничего никому не расшаривая.
-function bridgeCard() {
-  const b = S.state.bridge;
-  const save = async (u, k) => {
-    // при ошибке форму не перерисовываем — введённая ссылка и ключ остаются
-    const ok = await guarded(async () => {
-      S.state.bridge = (await POST("/api/remote/bridge", { url: u, key: k })).bridge;
-      S.bridgeEdit = false;
-      toast(S.state.bridge ? `Почта ${S.state.bridge.email} подключена` : "Почта отключена");
-      return true;
-    }, "Проверяю коннектор…");
-    if (ok) go("data");
-  };
-  if (b) {
-    return h("div", { class: "block-card", style: "margin-top:16px" },
-      h("div", { class: "row" },
-        h("div", { style: "flex:1" }, h("div", { class: "form-group-title", style: "margin:0" }, "Моя почта подключена"),
-          h("div", { class: "small muted" }, "Таблицы читаются от имени ", h("b", {}, b.email || "вашего аккаунта"),
-            ". Всё, что вы видите в Google Sheets под этой почтой, можно подключить по ссылке.")),
-        h("button", { class: "btn small ghost", onclick: () => { S.bridgeEdit = true; go("data"); } }, "Изменить"),
-        h("button", { class: "btn small danger", onclick: () => {
-          if (confirm("Отключить почту? Таблицы, подключённые через неё, перестанут загружаться.")) save("", "");
-        } }, "Отключить")),
-      S.bridgeEdit ? bridgeForm(save) : null);
-  }
-  return h("div", { class: "block-card", style: "margin-top:16px" },
-    h("div", { class: "form-group-title", style: "margin-top:0" }, "Подключить свою почту (один раз, ~5 минут)"),
-    h("p", { class: "small muted", style: "margin:0 0 10px;line-height:1.6" },
-      "Тогда таблицы с анкетами читаются от вашего имени: не нужно никому давать доступ к ним, достаточно вставить ссылку. Каждый руководитель подключает свою почту сам."),
-    bridgeForm(save));
-}
-
-function bridgeForm(save) {
-  const u = h("input", { type: "url", placeholder: "https://script.google.com/macros/s/…/exec", style: "flex:2;min-width:260px" });
-  const k = h("input", { type: "text", placeholder: "Ключ коннектора", style: "flex:1;min-width:200px" });
-  const code = h("textarea", { readonly: true, hidden: true, rows: 6, style: "width:100%;font-family:monospace;font-size:11px;margin-top:8px" });
-  const copy = async () => {
-    try {
-      const r = await GET("/api/remote/connector");
-      code.value = r.code;
-      code.hidden = false;
-      try { await navigator.clipboard.writeText(r.code); toast("Код скопирован"); }
-      catch (e) { code.select(); toast("Выделите код и скопируйте (Ctrl+C)", true); }
-    } catch (e) { toast(e.message, true); }
-  };
-  return h("div", {},
-    h("ol", { class: "small", style: "margin:0 0 12px;padding-left:18px;line-height:1.8" },
-      h("li", {}, h("button", { class: "btn small", onclick: copy }, "Скопировать код коннектора"), "  ", code),
-      h("li", {}, "Откройте ", h("span", { class: "kbd" }, "script.google.com"), " под своей почтой → «Новый проект». Удалите пример, вставьте код (Ctrl+V), сохраните."),
-      h("li", {}, "Вверху выберите функцию ", h("b", {}, "setup"), " → «Выполнить» → разрешите доступ (Дополнительно → Перейти к проекту → Разрешить). Внизу появится ", h("b", {}, "«Ключ коннектора: …»"), "."),
-      h("li", {}, "«Развернуть» → «Новое развёртывание» → «Веб-приложение». Выполнять от имени: ", h("b", {}, "Я"), ". У кого есть доступ: ", h("b", {}, "Все"), ". Скопируйте ссылку …/exec."),
-      h("li", {}, "Вставьте ссылку и ключ сюда:")),
-    h("div", { class: "row" }, u, k, h("button", { class: "btn primary", onclick: () => save(u.value, k.value) }, "Подключить почту")));
+    addForm);
 }
 
 // ── Автообновление ─────────────────────────────────────────────────────────
