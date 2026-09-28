@@ -619,7 +619,7 @@ def test_logic_contradictions_are_warnings():
         "Kapitalbank": ["Не знаю", "Знаю", "Знаю", "Знаю"] * 3,
         "Hamkor bank.3": [99, 1, 1, 1] * 3,
     })
-    found = logic.conflicts(raw)
+    found = {i: [m for _, m in v] for i, v in logic.conflicts(raw).items()}
     assert "Хамкор банк" in " ".join(found[0]) and "Капитал банк" in " ".join(found[0])
     assert sum("Hamkor" in m for m in found[0]) == 1, "одно противоречие на бренд, даже если колонок две"
     assert any("Uzum" in m for m in found[1])
@@ -649,3 +649,29 @@ def test_placeholder_phone_and_screenout_not_brak(cfg):
     assert not any(code == "dup_phone" for v in codes.values() for code, _ in v), "заглушка 998999999999 — не повтор"
     assert ("screenout", "note") in codes["1020"] and not df.loc["1020", "is_defect"]
     assert not {"no_rest", "start_gap"} & {x for x, _ in codes["1021"]}, "интервью после отсева — не «без перерыва»"
+
+
+def test_chain_and_age_logic():
+    """«Больше не знаю», а потом назвал — противоречие; один банк дважды —
+    для сведения; «Uzum nasiya» и «Uzum bank» — разные ответы; возраст
+    меньше порога отбора из текста анкеты."""
+    from anketa_qc import logic
+    base = ["Tbc", "Hamkor", "Anor bank", "Agrobank", "Uzum bank", "Kapital", "Ipoteka"] * 2
+    raw = pd.DataFrame({
+        "Сколько вам полных лет?": [30, 7, 15, 40] + [25] * 10,
+        "Скажите, пожалуйста, … участие могут принимать только лица, достигшие 16 лет.": [None] * 14,
+        "1. Какой банк первым приходит на ум?": base,
+        "2.2. А еще какой банк?": ["Boshqa bilmaydi", "Tbc bank", "Uzum nasiya", "Бошка билмайди"] + base[4:],
+        "2.3. А еще какой банк?": ["Hamkor bank", "Tbc", "Uzum bank", "Не видел"] + base[:10],
+    })
+    found = logic.conflicts(raw)
+    kinds = {i: {k for k, _ in v} for i, v in found.items()}
+    assert any("сказал «Boshqa bilmaydi»" in m for _, m in found[0]), found.get(0)
+    assert kinds[1] >= {"logic", "logic_dup"}, "возраст 7 и Tbc дважды"
+    assert any("возраст 15" in m and "16" in m for _, m in found[2])
+    assert 3 not in found, "«Бошка билмайди», потом «Не видел» — оба «не знаю»"
+    assert not any(k == "logic_dup" for k, _ in found.get(2, [])), "Uzum nasiya ≠ Uzum bank"
+    for v in ["Boshqa bilmaydi ", "Бошка билмайди", "Билмадим", "Бил", "Yoʻq", "999", "Не видел", "B bilmaydi"]:
+        assert logic.is_dont_know(v), v
+    for v in ["Tbc", "Давр банк", "Uzum nasiya"]:
+        assert not logic.is_dont_know(v), v

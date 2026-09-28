@@ -55,6 +55,7 @@ ISSUE_LABELS = {
     "external": "Брак, отмеченный вручную (аудиоконтроль / мониторинг)",
     "near_dup": "Почти копия другой анкеты (совпадает большинство ответов)",
     "logic": "Противоречие в ответах: сначала сказал одно, потом другое",
+    "logic_dup": "Один и тот же ответ записан в цепочке дважды",
     "screenout": "Анкета прервана в начале (отсев или отказ)",
     "block_fast": "Блок анкеты пройден намного быстрее обычного",
     "grid_same": "Во всём блоке-сетке один и тот же ответ",
@@ -81,6 +82,7 @@ SHORT_LABELS = {
     "external": "Брак по аудиоконтролю",
     "near_dup": "Почти копия другой анкеты",
     "logic": "Противоречие в ответах",
+    "logic_dup": "Повтор ответа в цепочке",
     "screenout": "Прервана в начале",
     "block_fast": "Блок пройден слишком быстро",
     "grid_same": "Одинаковые ответы в сетке",
@@ -790,9 +792,11 @@ def run(raw_input, cfg):
     if lg.get("auto", True):
         from . import logic
         found = logic.conflicts(raw_sorted, skip=roles_of(cfg["mapping"]))
-        found = {i: v for i, v in found.items() if df.at[i, "completed"]}
-        add(df.index.isin(list(found)), "logic", lg.get("severity", WARNING),
-            lambda i: "; ".join(found[i][:3]) + (f" (и ещё {len(found[i]) - 3})" if len(found[i]) > 3 else ""))
+        for kind, sev in (("logic", lg.get("severity", WARNING)), ("logic_dup", NOTE)):
+            msgs = {i: [m for k, m in v if k == kind] for i, v in found.items() if df.at[i, "completed"]}
+            msgs = {i: v for i, v in msgs.items() if v}
+            add(df.index.isin(list(msgs)), kind, sev,
+                lambda i, msgs=msgs: "; ".join(msgs[i][:3]) + (f" (и ещё {len(msgs[i]) - 3})" if len(msgs[i]) > 3 else ""))
 
     fast, block_summary = quality.block_times(df, raw_sorted, cfg, qc.get("block_fast_pct", 25))
     add(df.index.isin(list(fast)), "block_fast", qc.get("block_severity", WARNING),
