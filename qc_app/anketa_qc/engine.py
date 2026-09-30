@@ -55,6 +55,9 @@ ISSUE_LABELS = {
     "external": "Брак, отмеченный вручную (аудиоконтроль / мониторинг)",
     "near_dup": "Почти копия другой анкеты (совпадает большинство ответов)",
     "logic": "Противоречие в ответах: сначала сказал одно, потом другое",
+    "gps_bad": "Ошибочные GPS-координаты (сбой или подмена)",
+    "fast": "Интервью заметно быстрее обычного",
+    "screen_fail": "Респондент не подходит по условию отбора",
     "logic_dup": "Один и тот же ответ записан в цепочке дважды",
     "screenout": "Анкета прервана в начале (отсев или отказ)",
     "block_fast": "Блок анкеты пройден намного быстрее обычного",
@@ -82,6 +85,9 @@ SHORT_LABELS = {
     "external": "Брак по аудиоконтролю",
     "near_dup": "Почти копия другой анкеты",
     "logic": "Противоречие в ответах",
+    "gps_bad": "Ошибка GPS",
+    "fast": "Быстрее обычного",
+    "screen_fail": "Не проходит отбор",
     "logic_dup": "Повтор ответа в цепочке",
     "screenout": "Прервана в начале",
     "block_fast": "Блок пройден слишком быстро",
@@ -118,7 +124,7 @@ STATUS_LEVELS = {
 # слабых сигналов складываются, один сильный уже даёт высокий балл.
 RISK_WEIGHTS = {
     "external": 1.0, "conveyor": 0.7, "geo_same": 0.7, "geo_city": 0.7, "overlap": 0.6, "mass_open": 0.6,
-    "block_empty": 0.5, "grid_same": 0.3, "near_dup": 0.6, "logic": 0.25, "block_fast": 0.35, "geo_jump": 0.6, "dup_phone": 0.6,
+    "block_empty": 0.5, "grid_same": 0.3, "near_dup": 0.6, "logic": 0.25, "fast": 0.3, "screen_fail": 0.8, "block_fast": 0.35, "geo_jump": 0.6, "dup_phone": 0.6,
     "no_device": 0.5, "too_short": 0.5, "start_gap": 0.4, "geo_far": 0.4, "no_rest": 0.35,
     "night": 0.3, "dup_name": 0.3, "probe_low_avg": 0.3, "geo_cluster": 0.3,
     "too_long": 0.2, "probe_depth": 0.2, "device_multi_inter": 0.2, "no_gps": 0.15, "inter_multi_device": 0.1,
@@ -259,6 +265,12 @@ def normalize_city(v):
 
 def _is_blank(series):
     return series.isna() | (series.astype(str).str.strip() == "")
+
+
+def _mmss(minutes):
+    """1.96 → «1 мин 58 с» (а не «2.0 мин (< 2)», что читается как ошибка)."""
+    sec = int(round(float(minutes) * 60))
+    return f"{sec // 60} мин {sec % 60:02d} с" if sec >= 60 else f"{sec} с"
 
 
 def roles_of(m):
@@ -579,11 +591,29 @@ def run(raw_input, cfg):
 
     # --- Длительность --------------------------------------------------------
     dur = df["duration_min"]
-    add((dur > t["max_duration_min"]) & iv, "too_long", DEFECT,
-        lambda i: f"анкета длилась {dur[i]:.0f} мин (> {t['max_duration_min']})")
-    # Короткими обязаны быть скринауты — порог только для завершённых интервью.
-    add((dur < t["min_duration_min"]) & dur.notna() & df["completed"], "too_short", DEFECT,
-        lambda i: f"интервью длилось {dur[i]:.1f} мин (< {t['min_duration_min']})")
+    # Короткими обязаны быть скринауты — пороги только для завершённых интервью.
+    done = df["completed"] & dur.notna() & (dur > 0) & (dur < 24 * 60)
+    typical = float(dur[done].median()) if done.sum() >= 10 else None
+    df.attrs["typical_duration"] = typical
+    if t.get("duration_mode", "auto") == "auto" and typical:
+        # от обычной длительности этого проекта: анкета на 7 мин и на 40 мин
+        # проверяются одинаково честно
+        low = typical * t.get("fast_defect_pct", 50) / 100
+        check = typical * t.get("fast_check_pct", 70) / 100
+        high = typical * t.get("long_times", 3)
+        add(done & (dur < low), "too_short", DEFECT,
+            lambda i: f"интервью длилось {dur[i]:.1f} мин — быстрее {t.get('fast_defect_pct', 50)}% обычного "
+                      f"({typical:.1f} мин в этом проекте, брак — меньше {low:.1f} мин)")
+        add(done & (dur >= low) & (dur < check), "fast", WARNING,
+            lambda i: f"интервью длилось {dur[i]:.1f} мин — заметно быстрее обычного ({typical:.1f} мин)")
+        add((dur > high) & iv & dur.notna(), "too_long", WARNING,
+            lambda i: f"анкета была открыта {dur[i]:.0f} мин — в {dur[i] / typical:.0f} раз(а) дольше обычного "
+                      f"({typical:.1f} мин): возможно, заполнялась позже")
+    else:
+        add((dur < t["min_duration_min"]) & done, "too_short", DEFECT,
+            lambda i: f"интервью длилось {dur[i]:.1f} мин (< {t['min_duration_min']})")
+        add((dur > t["max_duration_min"]) & iv, "too_long", WARNING,
+            lambda i: f"анкета была открыта {dur[i]:.0f} мин (> {t['max_duration_min']}): возможно, заполнялась позже")
 
     # --- Интервал между анкетами и «отдых» ----------------------------------
     # Сравниваем с записью, которая была на устройстве прямо перед этой.
@@ -607,13 +637,13 @@ def run(raw_input, cfg):
     prev_txt = lambda i: (f"предыдущее интервью {prev_id[i]}: {prev_start[i]:%H:%M:%S}–"  # noqa: E731
                           f"{prev_end[i]:%H:%M:%S}" if pd.notna(prev_end[i]) else f"предыдущее интервью {prev_id[i]}")
     add((df["gap_min"] < thr) & df["gap_min"].notna(), "start_gap", DEFECT,
-        lambda i: f"начата через {df.at[i, 'gap_min']:.1f} мин после старта предыдущего интервью "
-                  f"(< {thr}); {prev_txt(i)}")
+        lambda i: f"начата через {_mmss(df.at[i, 'gap_min'])} после старта предыдущего интервью "
+                  f"(меньше {thr:g} мин); {prev_txt(i)}")
     # Не то же самое, что интервал между стартами: после длинной анкеты старты
     # могут быть далеко друг от друга, а реального перерыва не было.
     add((df["rest_min"] >= 0) & (df["rest_min"] < thr), "no_rest", DEFECT,
-        lambda i: f"начал в {df.at[i, 'start']:%H:%M:%S} — через {df.at[i, 'rest_min']:.1f} мин после окончания "
-                  f"предыдущего интервью (< {thr}); {prev_txt(i)}")
+        lambda i: f"начал в {df.at[i, 'start']:%H:%M:%S} — через {_mmss(df.at[i, 'rest_min'])} после окончания "
+                  f"предыдущего интервью (меньше {thr:g} мин); {prev_txt(i)}")
     # Анкета открыта раньше, чем закончено предыдущее интервью на том же
     # устройстве — несколько анкет заполнялись параллельно.
     add(df["rest_min"] < 0, "overlap", DEFECT,
@@ -792,7 +822,7 @@ def run(raw_input, cfg):
     if lg.get("auto", True):
         from . import logic
         found = logic.conflicts(raw_sorted, skip=roles_of(cfg["mapping"]))
-        for kind, sev in (("logic", lg.get("severity", WARNING)), ("logic_dup", NOTE)):
+        for kind, sev in (("logic", lg.get("severity", WARNING)), ("logic_dup", NOTE), ("screen_fail", DEFECT)):
             msgs = {i: [m for k, m in v if k == kind] for i, v in found.items() if df.at[i, "completed"]}
             msgs = {i: v for i, v in msgs.items() if v}
             add(df.index.isin(list(msgs)), kind, sev,
@@ -817,6 +847,10 @@ def run(raw_input, cfg):
     df["primary"] = [primary_issue(xs) for xs in issues]
     df["is_defect"] = df["issues"].map(lambda xs: any(s == DEFECT for _, s, _ in xs))
     df["is_warning"] = df["issues"].map(lambda xs: any(s == WARNING for _, s, _ in xs))
+    # Техническая запись (видео/фото по заданию) — не интервью: ни брака, ни
+    # «на проверку» у неё не бывает; замечания видны в самой записи. Иначе
+    # в разных местах программы получались разные цифры брака.
+    df.loc[df["technical"], ["is_defect", "is_warning"]] = False
     df["reason_text"] = df["issues"].map(lambda xs: "; ".join(x for _, s, x in xs if s == DEFECT))
     df["risk"] = df["issues"].map(risk_score)
     df["warning_text"] = df["issues"].map(lambda xs: "; ".join(x for _, s, x in xs if s == WARNING))
@@ -830,6 +864,7 @@ def run(raw_input, cfg):
         "raw": raw,
         "n_dropped": n_dropped,
         "data_checks": data_checks(df, raw, cfg, geo_result),
+        "typical_duration": typical,
         "city_issues": city_issues,
         "rule_errors": rule_errors,
         "wave_median": wave_median,

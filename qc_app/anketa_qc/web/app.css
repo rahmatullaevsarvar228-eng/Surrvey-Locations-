@@ -689,3 +689,13 @@ details.how[open] > summary { margin-bottom: 12px; }
 
 .pill.GRAY { background: rgba(120,120,128,0.14); color: var(--muted, #6e6e73); }
 .why li.note { opacity: 0.85; }
+
+/* ── Помощь ─────────────────────────────────────────────────────────────── */
+#helpBtn { font-weight: 700; font-size: 17px; }
+.help { display: flex; flex-direction: column; gap: 12px; font-size: 15px; line-height: 1.5; }
+.help h3 { margin: 10px 0 0; font-size: 16px; }
+.help-step, .help-st { display: flex; gap: 12px; align-items: flex-start; }
+.help-n { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+.help-st .dot { flex: none; width: 14px; height: 14px; border-radius: 50%; margin-top: 5px; }
+.help-st .dot.c-ok { background: #0ca30c; } .help-st .dot.c-warn { background: #fab219; } .help-st .dot.c-brak { background: #d03b3b; }

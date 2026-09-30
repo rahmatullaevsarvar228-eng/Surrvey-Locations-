@@ -57,6 +57,14 @@ DEFAULT_CONFIG = {
     "completed_cols": [],
     "thresholds": {
         "min_interval_min": 2,
+        # Длительность — как в международной практике (ISO 20252, AAPOR):
+        # «auto» — от обычной (медианной) длительности ЭТОГО проекта:
+        # быстрее 40% обычной — брак, 40–60% — на проверку, дольше 3 обычных
+        # — на проверку. «fixed» — по минутам ниже.
+        "duration_mode": "auto",
+        "fast_defect_pct": 50,
+        "fast_check_pct": 70,
+        "long_times": 3,
         "min_duration_min": 5,
         "max_duration_min": 30,
         "max_share_city_pct": 50,
@@ -100,7 +108,7 @@ DEFAULT_CONFIG = {
         "max_dist_km": 2.0,          # дальше от плановой точки — отмечаем
         "max_per_point": 20,         # максимум анкет интервьюера в одном месте
         "min_sep_km": 1.5,           # радиус «одного места» для скоплений
-        "same_point_min": 3,         # столько анкет с одинаковыми координатами — подозрительно
+        "same_point_min": 5,         # столько анкет интервьюера в точно одной точке — подозрительно (у точки опроса 2–4 совпадения бывают)
         "far_severity": "warning",
         "cluster_severity": "note",   # у точки опроса скопление — норма
         "same_severity": "warning",

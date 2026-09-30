@@ -357,7 +357,7 @@ def test_gap_after_technical_task_is_not_defect(cfg):
     assert not codes["1001"] and not codes["1002"] and not codes["1004"]
     assert "no_rest" in codes["1003"]
     text = next(t for c, _, t in res["df"].set_index("row_id").loc["1003", "issues"] if c == "no_rest")
-    assert "1002" in text and "0.5 мин" in text
+    assert "1002" in text and "30 с" in text and "меньше 2 мин" in text
 
 
 def test_out_of_city_and_region(cfg):
@@ -667,7 +667,7 @@ def test_chain_and_age_logic():
     found = logic.conflicts(raw)
     kinds = {i: {k for k, _ in v} for i, v in found.items()}
     assert any("сказал «Boshqa bilmaydi»" in m for _, m in found[0]), found.get(0)
-    assert kinds[1] >= {"logic", "logic_dup"}, "возраст 7 и Tbc дважды"
+    assert kinds[1] >= {"screen_fail", "logic_dup"}, "возраст 7 — не проходит отбор; Tbc дважды"
     assert any("возраст 15" in m and "16" in m for _, m in found[2])
     assert 3 not in found, "«Бошка билмайди», потом «Не видел» — оба «не знаю»"
     assert not any(k == "logic_dup" for k, _ in found.get(2, [])), "Uzum nasiya ≠ Uzum bank"
@@ -675,3 +675,37 @@ def test_chain_and_age_logic():
         assert logic.is_dont_know(v), v
     for v in ["Tbc", "Давр банк", "Uzum nasiya"]:
         assert not logic.is_dont_know(v), v
+
+
+def test_duration_relative_to_project():
+    """Пороги длительности — от обычной длительности проекта (ISO/AAPOR):
+    в анкете на 30 мин 8-минутное интервью — брак, 15-минутное — на проверку;
+    долго открытая анкета — на проверку, а не брак."""
+    rows = [make_row(i, f"D{i}", "A", f"2025-09-0{1 + i % 5} 1{i % 10}:00", 30) for i in range(20)]
+    rows += [make_row(20, "X1", "B", "2025-09-06 10:00", 8), make_row(21, "X2", "B", "2025-09-06 12:00", 15),
+             make_row(22, "X3", "B", "2025-09-06 14:00", 200)]
+    raw = pd.DataFrame(rows)
+    c = config.default_config()
+    c["mapping"] = config.suggest_mapping(list(raw.columns))
+    df = engine.run(raw, c)["df"].set_index("row_id")
+    sev = {k: {x[0]: x[1] for x in v} for k, v in df["issues"].items()}
+    assert sev["1020"].get("too_short") == "defect"
+    assert sev["1021"].get("fast") == "warning" and "too_short" not in sev["1021"]
+    assert sev["1022"].get("too_long") == "warning" and not df.loc["1022", "is_defect"]
+    assert not any(sev[str(1000 + i)] for i in range(20) if "too_short" in sev[str(1000 + i)])
+
+
+def test_technical_records_never_brak(cfg):
+    """Видео-задание — не интервью: брака и «на проверку» у него нет, чтобы
+    цифра брака везде (экран, сообщение, Excel, Word) была одна."""
+    rows = [make_row(i, "D1", "A", f"2025-09-01 1{i}:00", 10) for i in range(6)]
+    tech = make_row(9, "D1", "A", "2025-09-01 16:05", 0.5, city="Самарканд")
+    tech["Тип записи"] = "Техническое задание (видео)"
+    for r in rows:
+        r["Тип записи"] = "Интервью"
+    raw = pd.DataFrame(rows + [tech])
+    c = config.default_config()
+    c["mapping"] = config.suggest_mapping(list(raw.columns))
+    df = engine.run(raw, c)["df"]
+    t = df[df["technical"]]
+    assert len(t) == 1 and not t["is_defect"].any() and not t["is_warning"].any()

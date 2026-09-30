@@ -417,10 +417,12 @@ def conflicts(raw, skip=()):
     """{строка: [(вид, текст)]}: «logic» — противоречие, «logic_dup» — один
     бренд назван в цепочке дважды (для сведения)."""
     out = {}
-    for part in (aware_conflicts(raw, skip), brand_answer_conflicts(raw, skip), none_conflicts(raw, skip),
-                 age_conflicts(raw, skip)):
+    for part in (aware_conflicts(raw, skip), brand_answer_conflicts(raw, skip), none_conflicts(raw, skip)):
         for i, msgs in part.items():
             out.setdefault(i, []).extend(("logic", m) for m in msgs)
+    # не проходит отбор — это уже не противоречие, а неподходящий респондент
+    for i, msgs in age_conflicts(raw, skip).items():
+        out.setdefault(i, []).extend(("screen_fail", m) for m in msgs)
     for i, items in chain_conflicts(raw, skip).items():
         out.setdefault(i, []).extend(items)
     return out

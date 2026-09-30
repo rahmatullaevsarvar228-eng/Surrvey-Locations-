@@ -167,7 +167,19 @@ def check(df, cfg, add):
     и возвращает сводку для интерфейса. df уже отсортирован движком."""
     g = cfg["geo"]
     has_gps = df["lat"].notna() & df["lon"].notna()
-    add(~has_gps, "no_gps", g.get("no_gps_severity", "warning"), lambda i: "нет GPS-координат")
+    # Сбой GPS телефона (точка в океане, «0.58 −0.23»): дальше 1500 км от
+    # того места, где работает весь проект. Это не «чужой город», а ошибка
+    # координат — такие точки в остальных GPS-проверках не участвуют.
+    far = pd.Series(False, index=df.index)
+    if has_gps.sum() >= 5:
+        c_lat, c_lon = float(df.loc[has_gps, "lat"].median()), float(df.loc[has_gps, "lon"].median())
+        far = (pd.Series(haversine_km(df["lat"].to_numpy(), df["lon"].to_numpy(), c_lat, c_lon), index=df.index) > 1500) & has_gps
+        add(far, "gps_bad", "warning",
+            lambda i: f"координаты {df.at[i, 'lat']:.4f}, {df.at[i, 'lon']:.4f} — тысячи километров от места опроса: "
+                      "сбой GPS или подмена координат")
+        df.loc[far, ["lat", "lon"]] = np.nan
+        has_gps &= ~far
+    add(~has_gps & ~far, "no_gps", g.get("no_gps_severity", "warning"), lambda i: "нет GPS-координат")
 
     plan = _plan_lookup(g.get("plan"))
     max_dist = float(g.get("max_dist_km", 2.0))
@@ -261,7 +273,7 @@ def check(df, cfg, add):
                   f"{min_sep:g} км (> {max_per_point})")
 
     # одинаковые до ~1 м координаты у разных анкет одного интервьюера
-    same_min = int(g.get("same_point_min", 3))
+    same_min = int(g.get("same_point_min", 5))
     key = df["lat"].round(5).astype(str) + "," + df["lon"].round(5).astype(str)
     df["geo_same_n"] = 0
     gps = df[has_gps & ~df["technical"]]

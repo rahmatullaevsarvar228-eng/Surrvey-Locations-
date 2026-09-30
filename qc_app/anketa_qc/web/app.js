@@ -8,8 +8,8 @@ const DECISION_ICON = { "Брак": "❌", "Принять": "✅", "На пер
 const ROLE_LABEL = { admin: "Администратор", lead: "Руководитель проекта", user: "Сотрудник" };
 const riskTag = (v) => h("span", { class: `risk ${v >= 70 ? "hi" : v >= 40 ? "mid" : v > 0 ? "lo" : "none"}`, title: "Балл риска 0–100: чем больше и серьёзнее сигналов, тем выше" }, v ?? 0);
 const decisionTag = (d) => d ? h("span", { class: `decision ${DECISION_CLASS[d]}` }, `${DECISION_ICON[d]} ${d}`) : h("span", { class: "decision d-none" }, "не решено");
-const STATUS_LABEL = { RED: "Критично", YELLOW: "Внимание", GREEN: "Норма" };
-const SEVERITY_OPTIONS = [["defect", "Брак"], ["warning", "Сомнительно"], ["note", "Для сведения"]];
+const STATUS_LABEL = { RED: "Критично", YELLOW: "Внимание", GREEN: "В порядке" };
+const SEVERITY_OPTIONS = [["defect", "Брак"], ["warning", "На проверку"], ["note", "Для сведения"]];
 
 // ── Утилиты ───────────────────────────────────────────────────────────────
 function h(tag, attrs, ...children) {
@@ -227,9 +227,9 @@ const SETUP_STEPS = [
 // hint — одна строка простыми словами: что на этой странице и зачем.
 const PAGES = {
   data: { title: "Источники данных", hint: "Google-таблицы, куда поступают анкеты. Подключите таблицу один раз — дальше программа сама забирает и проверяет новые анкеты.", render: pageData },
-  overview: { title: "Сводка", hint: "Главное по проекту на одном экране: сколько анкет, сколько брака, где проблемы и кто работает хуже всех.", render: pageOverview },
+  overview: { title: "Главная", hint: "Итог по проекту и что сделать сейчас. Нажимайте на цифры и строки — откроются подробности.", render: pageOverview },
   daily: { title: "По дням", hint: "Кто сколько анкет сделал в каждый день, выполнил ли норму и кто не работал. Брак в норму не засчитывается.", render: pageDaily },
-  defects: { title: "Брак: где и почему", hint: "Почему анкеты забракованы, в каком блоке анкеты ошибка, в каком городе и у кого.", render: pageDefects },
+  defects: { title: "Причины брака", hint: "Почему анкеты забракованы, в каком блоке анкеты ошибка, в каком городе и у кого.", render: pageDefects },
   map: { title: "Карта GPS", hint: "Где на самом деле проводились интервью: по плановым точкам, в своём ли городе, сколько анкет в каждой точке.", render: pageMap },
   interviewers: { title: "Интервьюеры", hint: "Каждый интервьюер: сколько сделал, сколько брака и что с ним делать. Нажмите на строку — карточка интервьюера.", render: pageInterviewers },
   quotas: { title: "Выполнение квот", hint: "Сколько анкет засчитано по плану и сколько осталось добрать. Брак в план не идёт.", render: pageQuotas },
@@ -271,6 +271,8 @@ function go(page) {
   const content = $("#content");
   const page_ = h("div", { class: "page" },
     h("div", { class: "page-head" }, h("h1", {}, PAGES[page].title), PAGES[page].hint ? h("p", {}, PAGES[page].hint) : null));
+  // пустые блоки (null) не выводим — иначе на странице появлялось слово «null»
+  page_.append = (...xs) => Element.prototype.append.apply(page_, xs.filter((x) => x !== null && x !== undefined && x !== false));
   content.replaceChildren(page_);
   content.scrollTop = 0;
   Promise.resolve(PAGES[page].render(page_)).catch((e) => toast(e.message, true));
@@ -526,8 +528,15 @@ function pageChecks(root) {
   root.append(h("div", { class: "card" }, h("h2", {}, "Время и устройство"),
     h("p", { class: "hint" }, "Технические признаки фальсификации — работают на выгрузке любого проекта."),
     h("div", { class: "form-list" },
-      formRow("Минимальная длительность интервью", "Только для завершённых анкет", [number(t, "min_duration_min", 1, 120), h("span", { class: "unit" }, "мин")]),
-      formRow("Максимальная длительность анкеты", "Дольше — скорее всего не закрыл форму вовремя", [number(t, "max_duration_min", 5, 600), h("span", { class: "unit" }, "мин")]),
+      formRow("Длительность интервью", "«От проекта» — как в международной практике: пороги считаются от обычной длительности этой анкеты. «В минутах» — одни и те же минуты для всех",
+        select([["auto", "от проекта (рекомендуется)"], ["fixed", "в минутах"]], t.duration_mode || "auto", (v) => { t.duration_mode = v; saveConfigSoon(); go(S.page); })),
+      ...((t.duration_mode || "auto") === "auto" ? [
+        formRow("Слишком быстро", `Брак — быстрее этой доли обычной длительности${S.result && S.result.typical_duration ? ` (сейчас обычно ${fmt(S.result.typical_duration, 1)} мин)` : ""}; на проверку — быстрее второй доли`,
+          [number(t, "fast_defect_pct", 10, 90), h("span", { class: "unit" }, "% брак"), number(t, "fast_check_pct", 10, 95), h("span", { class: "unit" }, "% на проверку")]),
+        formRow("Анкета открыта слишком долго", "Во столько раз дольше обычного — на проверку (не брак: могли не закрыть вовремя)", [number(t, "long_times", 2, 20), h("span", { class: "unit" }, "раз")])]
+      : [
+        formRow("Минимальная длительность интервью", "Короче — брак (только для завершённых анкет)", [number(t, "min_duration_min", 1, 120), h("span", { class: "unit" }, "мин")]),
+        formRow("Максимальная длительность анкеты", "Дольше — на проверку", [number(t, "max_duration_min", 5, 600), h("span", { class: "unit" }, "мин")])]),
       formRow("Минимальный интервал между анкетами", "И между стартами, и между концом предыдущей и началом следующей", [number(t, "min_interval_min", 0, 60, 0.5), h("span", { class: "unit" }, "мин")]),
       formRow("«Конвейер»: окно времени", "Сколько минут смотреть подряд на одном устройстве", [number(t, "mass_window_min", 1, 120), h("span", { class: "unit" }, "мин")]),
       formRow("«Конвейер»: анкет в окне", "Столько анкет и больше в окне — массовое штампование", [number(t, "mass_min_count", 2, 100), h("span", { class: "unit" }, "шт")]),
@@ -1196,8 +1205,8 @@ function reviewFilters(rv) {
   const f = {
     todo: ["Нужно решить", (a) => (a.defect || a.warning) && !a.decision && !a.technical && !a.rejected],
     brak: ["Брак", (a) => st(a) === "brak"],
-    warn: ["Сомнительно", (a) => st(a) === "warn"],
-    ok: ["Норма", (a) => st(a) === "ok"],
+    warn: ["На проверку", (a) => st(a) === "warn"],
+    ok: ["Без замечаний", (a) => st(a) === "ok"],
     call: ["На прозвон", (a) => backcheck().has(a.pos)],
     listen: ["На прослушку", (a) => !!a.listen],
     tech: ["Тех. записи", (a) => a.technical],
@@ -1226,7 +1235,8 @@ function pageReview(root) {
   if (!filters[S.reviewFilter]) S.reviewFilter = rv.enabled ? "todo" : "brak";
   const rows = all.filter(filters[S.reviewFilter][1]).map((a) => ({ ...a, st: stateOf(a),
     why: (a.issues.find((i) => i[0] === a.primary) || [])[3] || "", what: (a.issues.find((i) => i[0] === a.primary) || [])[4] || "",
-    block: [...new Set(a.issues.map((i) => i[2]))].join(", ") }));
+    // «Блок» — только по браку и «на проверку»; пометки «для сведения» не путают
+    block: [...new Set(a.issues.filter((i) => i[1] !== "note").map((i) => i[2]))].join(", ") }));
   const visible = new Set(rows.map((r) => r.pos));
   [...S.sel].forEach((p) => { if (!visible.has(p)) S.sel.delete(p); });
   const canDecide = rv.enabled && rv.can_decide;
@@ -1334,7 +1344,7 @@ async function openAnketa(pos) {
     h("h3", {}, d.issues.length ? "Почему система отметила анкету" : "Замечаний нет"),
     h("ul", { class: "why" }, d.issues.map((i) => h("li", { class: i.severity },
       h("span", { class: `pill ${i.severity === "defect" ? "RED" : i.severity === "note" ? "GRAY" : "YELLOW"}` },
-        i.severity === "defect" ? "Брак" : i.severity === "note" ? "Для сведения" : "Сомнительно"),
+        i.severity === "defect" ? "Брак" : i.severity === "note" ? "Для сведения" : "На проверку"),
       h("div", { class: "t" }, i.label, h("span", { class: "blk" }, `Блок: ${i.block}`)),
       h("div", {}, i.text),
       h("div", { class: "l" }, "Логика: ", i.logic),
@@ -1483,6 +1493,25 @@ function pageQuotas(root) {
 }
 
 // ── Модальное окно ──────────────────────────────────────────────────────────
+// ── Помощь для новичка: весь рабочий процесс на одном экране ───────────────
+function showHelp() {
+  const step = (n, t, d) => h("div", { class: "help-step" }, h("span", { class: "help-n" }, n), h("div", {}, h("b", {}, t), h("div", { class: "muted" }, d)));
+  const st = (cls, t, d) => h("div", { class: "help-st" }, h("span", { class: `dot ${cls}` }), h("div", {}, h("b", {}, t), h("div", { class: "muted" }, d)));
+  openModal("Как работать с программой", h("div", { class: "help" },
+    h("p", {}, "Программа сама проверяет каждую анкету из Kobo по одинаковым правилам (как в международных стандартах ISO 20252 и AAPOR) и делит анкеты на три группы:"),
+    st("c-ok", "Без замечаний", "Нарушений не найдено. Ничего делать не нужно."),
+    st("c-warn", "На проверку", "Есть сигнал, но это ещё не брак: послушайте аудио или перезвоните респонденту, потом поставьте решение."),
+    st("c-brak", "Брак", "Нарушение, при котором интервью не могло пройти правильно: слишком быстро, копия, две анкеты одновременно, повтор респондента, не в своём городе, «1» от аудиоконтроля. Руководитель может принять анкету, если это ошибка."),
+    h("h3", {}, "Каждый день — 4 шага"),
+    step(1, "Главная", "Светофор и список «Что сделать сейчас»."),
+    step(2, "Анкеты → «Нужно решить»", "Откройте анкету: там написано, почему она отмечена. Нажмите «Брак», «Принять» или «На перезвон»."),
+    step(3, "Интервьюеры", "Кто в красной зоне — карточка интервьюера в Word для инструктажа."),
+    step(4, "По дням", "Кто не работал и кто не выполнил норму. Брак и прерванные анкеты в норму не идут."),
+    h("p", { class: "muted" }, "Видео-задания (ТЗ) и анкеты, прерванные в начале (отсев), — не брак: программа находит их сама."),
+    S.state.user && ["lead", "admin"].includes(S.state.user.role)
+      ? h("p", { class: "muted" }, "Пороги и правила — в меню ⋯ → «Настройка проверки». Обычно менять ничего не нужно.") : null), true);
+}
+
 function openModal(title, body, wide) {
   document.querySelector(".sheet-panel").classList.toggle("wide", !!wide);
   $("#modalTitle").textContent = title;
@@ -1513,6 +1542,7 @@ async function init() {
   $("#wordBtn").addEventListener("click", () => exportReport("word"));
   $("#moreBtn").addEventListener("click", (e) => { e.stopPropagation(); $("#morePop").hidden = !$("#morePop").hidden; });
   document.addEventListener("click", (e) => { if (!e.target.closest(".menu-wrap")) $("#morePop").hidden = true; });
+  $("#helpBtn").addEventListener("click", showHelp);
   document.querySelectorAll("#morePop [data-page]").forEach((b) => b.addEventListener("click", () => (b.dataset.page === "setup" ? openSetup() : go(b.dataset.page))));
   document.querySelectorAll("#morePop [data-export]").forEach((b) => b.addEventListener("click", () => { $("#morePop").hidden = true; exportReport(b.dataset.export); }));
   $("#pwdBtn").addEventListener("click", () => { $("#morePop").hidden = true; changePassword(); });

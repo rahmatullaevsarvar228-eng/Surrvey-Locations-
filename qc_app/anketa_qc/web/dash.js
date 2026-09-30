@@ -6,8 +6,8 @@
 // ── Состояние анкеты с учётом решения руководителя ──────────────────────────
 const ST = {
   brak: { label: "Брак", icon: "✕", cls: "st-brak" },
-  warn: { label: "Сомнительно", icon: "!", cls: "st-warn" },
-  ok: { label: "Норма", icon: "✓", cls: "st-ok" },
+  warn: { label: "На проверку", icon: "!", cls: "st-warn" },
+  ok: { label: "Без замечаний", icon: "✓", cls: "st-ok" },
   tech: { label: "Тех. записи", icon: "▶", cls: "st-tech" },
 };
 function stateOf(a) {
@@ -137,7 +137,7 @@ function dayColumns(anks, onPick) {
         ["ok", "warn", "brak"].map((k) => x[k] ? h("i", { class: `c-${k}`, style: `flex:${x[k]}` }) : null)),
       h("div", { class: "cc-x" }, dayLabel(x.d)));
     hoverable(col, () => [h("div", { class: "tip-h" }, dayLabel(x.d)), tipVal(fmt(x.brak), "брак", "c-brak"),
-      tipVal(fmt(x.warn), "сомнительно", "c-warn"), tipVal(fmt(x.ok), "норма", "c-ok"), h("div", { class: "muted" }, `всего ${fmt(x.total)}`)]);
+      tipVal(fmt(x.warn), "на проверку", "c-warn"), tipVal(fmt(x.ok), "без замечаний", "c-ok"), h("div", { class: "muted" }, `всего ${fmt(x.total)}`)]);
     bars.append(col);
   }
   box.append(grid, bars);
@@ -257,6 +257,8 @@ function pageOverview(root) {
   const anks = scoped();
   const c = counts(anks);
   root.append(filterBar("overview"));
+  // новичку инструкция открывается сама — один раз
+  try { if (!localStorage.getItem("helpSeen")) { localStorage.setItem("helpSeen", "1"); setTimeout(showHelp, 400); } } catch (e) { /* без хранилища — просто не показываем */ }
   const dc = dataChecks();
   if (dc) root.append(dc);
   if (R.rule_errors.length) root.append(h("div", { class: "notice bad" }, h("div", {}, h("b", {}, "Некоторые правила не проверены: "), R.rule_errors.join("; "))));
@@ -266,8 +268,8 @@ function pageOverview(root) {
   root.append(h("div", { class: "stats big" },
     tile("Всего анкет", fmt(c.iv), c.tech ? `+ ${fmt(c.tech)} видео/ТЗ (не считаются)` : s.period || ""),
     tile("Брак", fmt(c.brak), `${fmt(pct(c.brak, c.iv), 1)}% — нажмите, почему`, "red", () => go("defects")),
-    tile("Сомнительно", fmt(c.warn), "не брак, но стоит посмотреть", "yellow", () => { S.reviewFilter = "warn"; go("review"); }),
-    tile("Хорошие", fmt(c.ok), `${fmt(pct(c.ok, c.iv), 1)}% анкет`, "green")));
+    tile("На проверку", fmt(c.warn), "послушать аудио или перезвонить", "yellow", () => { S.reviewFilter = "warn"; go("review"); }),
+    tile("Без замечаний", fmt(c.ok), `${fmt(pct(c.ok, c.iv), 1)}% анкет`, "green")));
 
   root.append(h("div", { class: "grid-2 wide-left" },
     card("Что сделать сейчас", "Самое важное по проекту. Нажмите на строку — откроется нужный экран.", todoList(anks)),
@@ -283,7 +285,7 @@ function pageOverview(root) {
 
   root.append(h("div", { class: "grid-2" },
     card("Анкеты по дням", "Нажмите на день — все экраны покажут только его.",
-      legend([["c-brak", "Брак"], ["c-warn", "Сомнительно"], ["c-ok", "Хорошие"]]),
+      legend([["c-brak", "Брак"], ["c-warn", "На проверку"], ["c-ok", "Без замечаний"]]),
       dayColumns(scoped().filter((a) => matches(a, "date")), (d) => setFilter("date", F().date === d ? null : d, "overview"))),
     card("Брак по городам", "Доля брака среди анкет города. Нажмите на город, чтобы смотреть только его.",
       cityBars([...groupBy(anks.filter((a) => !a.technical), "city")].map(([city, v]) => {
@@ -364,7 +366,7 @@ function lastDayCard() {
 
 function cityBars(cities) {
   return hbars(cities.map((x) => ({ ...x, tip: () => [h("div", { class: "tip-h" }, x.label),
-    tipVal(fmt(x.cc.brak), "брак", "c-brak"), tipVal(fmt(x.cc.warn), "сомнительно", "c-warn"), tipVal(fmt(x.cc.ok), "норма", "c-ok")] })),
+    tipVal(fmt(x.cc.brak), "брак", "c-brak"), tipVal(fmt(x.cc.warn), "на проверку", "c-warn"), tipVal(fmt(x.cc.ok), "без замечаний", "c-ok")] })),
   { color: "c-brak", max: 100, limit: 10, fmtVal: (it) => `${fmt(it.value, 0)}% · ${fmt(it.n)}`,
     onClick: (it) => setFilter("city", F().city === it.label ? null : it.label, S.page) });
 }
@@ -379,8 +381,8 @@ function riskList(anks) {
   return h("div", { class: "risk-list" }, rows.map((r) => h("div", { class: "risk-row clickable", onclick: () => showInterviewer(r.inter) },
     pill(r.lvl), h("div", { class: "rl-name" }, h("b", {}, r.inter), h("span", { class: "muted small" }, ` · ${r.city}`),
       r.top ? h("div", { class: "muted small" }, r.top) : null),
-    h("div", { class: "rl-bar" }, stackBar([{ value: r.cc.brak, color: "c-brak", label: "брак" }, { value: r.cc.warn, color: "c-warn", label: "сомнительно" },
-      { value: r.cc.ok, color: "c-ok", label: "норма" }])),
+    h("div", { class: "rl-bar" }, stackBar([{ value: r.cc.brak, color: "c-brak", label: "брак" }, { value: r.cc.warn, color: "c-warn", label: "на проверку" },
+      { value: r.cc.ok, color: "c-ok", label: "без замечаний" }])),
     h("div", { class: "rl-val" }, `${fmt(r.p, 0)}%`))));
 }
 function saveWave() {
@@ -404,7 +406,7 @@ function pageDefects(root) {
   root.append(h("div", { class: "row", style: "margin-bottom:14px" },
     h("div", { class: "segmented" },
       h("button", { class: sev === "defect" ? "on" : "", onclick: () => { S.defSev = "defect"; S.defReason = null; go("defects"); } }, `Брак · ${fmt(c.brak)}`),
-      h("button", { class: sev === "warning" ? "on" : "", onclick: () => { S.defSev = "warning"; S.defReason = null; go("defects"); } }, `Сомнительно · ${fmt(c.warn)}`)),
+      h("button", { class: sev === "warning" ? "on" : "", onclick: () => { S.defSev = "warning"; S.defReason = null; go("defects"); } }, `На проверку · ${fmt(c.warn)}`)),
     reason ? h("span", { class: "chip-on" }, "Причина: ", h("b", {}, label(reason)), h("button", { title: "Снять", onclick: () => { S.defReason = null; go("defects"); } }, "×")) : null,
     h("span", { class: "spacer" }),
     h("span", { class: "muted small" }, sev === "defect" ? "С учётом решений руководителя: «Принять» убирает из брака, «Брак» добавляет." : "Сигналы для ручной проверки — сами по себе не брак.")));
@@ -412,7 +414,7 @@ function pageDefects(root) {
   const inters = new Set(sel.map((a) => a.inter));
   const cities = new Set(sel.map((a) => a.city));
   root.append(h("div", { class: "stats" },
-    tile(sev === "defect" ? "Анкет с браком" : "Сомнительных анкет", fmt(sel.length), `${fmt(pct(sel.length, c.iv), 1)}% всех анкет`, sev === "defect" ? "red" : "yellow"),
+    tile(sev === "defect" ? "Анкет с браком" : "Анкет на проверку", fmt(sel.length), `${fmt(pct(sel.length, c.iv), 1)}% всех анкет`, sev === "defect" ? "red" : "yellow"),
     tile("Интервьюеров", fmt(inters.size), `из ${fmt(new Set(anks.map((a) => a.inter)).size)}`),
     tile("Городов", fmt(cities.size), `из ${fmt(new Set(anks.map((a) => a.city)).size)}`),
     tile("Средний риск", fmt(sel.length ? sel.reduce((x, a) => x + a.risk, 0) / sel.length : 0), "балл 0–100 по сигналам")));
@@ -501,7 +503,7 @@ function pageInterviewers(root) {
     const p = pct(cc.brak, cc.iv);
     const top = reasonCounts(v.filter(isBrak), "defect").slice(0, 2).map(([code, n]) => `${label(code)} ×${n}`).join(", ");
     return { "Интервьюер": inter, "Город": v[0].city, "Регион": v[0].region, "Анкет": cc.iv, "Тех.": cc.tech, "Брак": cc.brak,
-      "Сомнительно": cc.warn, "% брака": Math.round(p * 10) / 10, "Статус": levelOf(p), cc,
+      "На проверку": cc.warn, "% брака": Math.round(p * 10) / 10, "Статус": levelOf(p), cc,
       "Риск": v.length ? Math.round(v.reduce((x, a) => x + a.risk, 0) / v.length) : 0, "Главные причины": top };
   });
   const sc = { RED: 0, YELLOW: 0, GREEN: 0 };
@@ -516,13 +518,13 @@ function pageInterviewers(root) {
     h("div", { class: "card-head" }, h("div", {}, h("h2", {}, "Все интервьюеры"),
       h("p", { class: "hint" }, "Полоса — состав его анкет: брак, проверить, норма. Нажмите на строку — карточка интервьюера: причины, дни, маршрут, анкеты.")),
       h("button", { class: "btn small", onclick: () => exportReport("interviewers") }, "Excel")),
-    legend([["c-brak", "Брак"], ["c-warn", "Сомнительно"], ["c-ok", "Норма"]]),
+    legend([["c-brak", "Брак"], ["c-warn", "На проверку"], ["c-ok", "Без замечаний"]]),
     table([
       { key: "Статус", label: "Статус", render: (r) => pill(r["Статус"]), sortVal: (r) => ({ RED: 3, YELLOW: 2, GREEN: 1 })[r["Статус"]] },
       { key: "Интервьюер", label: "Интервьюер" }, { key: "Город", label: "Город" },
       { key: "Анкет", label: "Анкет", num: true },
       { key: "bar", label: "Состав анкет", sortVal: (r) => r["% брака"], render: (r) => h("div", { class: "cell-stack" },
-        stackBar([{ value: r.cc.brak, color: "c-brak", label: "брак" }, { value: r.cc.warn, color: "c-warn", label: "сомнительно" }, { value: r.cc.ok, color: "c-ok", label: "норма" }])) },
+        stackBar([{ value: r.cc.brak, color: "c-brak", label: "брак" }, { value: r.cc.warn, color: "c-warn", label: "на проверку" }, { value: r.cc.ok, color: "c-ok", label: "без замечаний" }])) },
       { key: "% брака", label: "% брака", num: true, digits: 1 },
       { key: "Риск", label: "Риск", num: true, render: (r) => riskTag(r["Риск"]) },
       { key: "Главные причины", label: "Главные причины брака", wrap: true },
@@ -547,10 +549,10 @@ function showInterviewer(inter) {
     h("div", { class: "stats" },
       tile("Статус", pill(levelOf(p)), `${fmt(p, 1)}% брака`),
       tile("Анкет", fmt(cc.iv), cc.tech ? `+ ${fmt(cc.tech)} тех. записей` : [...new Set(all.map((a) => a.city))].join(", ")),
-      tile("Брак", fmt(cc.brak), "", "red"), tile("Сомнительно", fmt(cc.warn), "", "yellow")),
+      tile("Брак", fmt(cc.brak), "", "red"), tile("На проверку", fmt(cc.warn), "", "yellow")),
     h("div", { class: "grid-2" },
       card("Почему брак", null, hbars(reasonCounts(all.filter(isBrak), "defect").map(([code, n]) => ({ label: label(code), value: n })), { color: "c-brak", empty: "Брака нет" })),
-      card("По дням", null, legend([["c-brak", "Брак"], ["c-warn", "Сомнительно"], ["c-ok", "Норма"]]), dayColumns(all))),
+      card("По дням", null, legend([["c-brak", "Брак"], ["c-warn", "На проверку"], ["c-ok", "Без замечаний"]]), dayColumns(all))),
     ((S.result.answer_patterns || []).find((p) => p.inter === inter) || null) ? card("Необычные ответы его респондентов", "По сравнению с остальными интервьюерами.",
       h("ul", { class: "pat-notes" }, S.result.answer_patterns.find((p) => p.inter === inter).notes.map((t) => h("li", {}, t)))) : null,
     all.some((a) => a.lat != null) ? card("Маршрут", "Анкеты по времени; линия — порядок в течение дня.", miniMap(all, null, true)) : null,

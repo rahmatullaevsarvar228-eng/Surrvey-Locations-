@@ -304,6 +304,7 @@ def result_payload(sess):
         "answers": _records(r["answers"]["all"]),
         "rule_errors": r["rule_errors"],
         "data_checks": r.get("data_checks") or [],
+        "typical_duration": _clean(r.get("typical_duration")),
         "legend": engine.status_legend(cfg),
         "sections": r.get("sections", []),
         "answer_patterns": _clean_deep(r.get("answer_patterns") or []),
