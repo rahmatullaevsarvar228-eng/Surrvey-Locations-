@@ -279,7 +279,7 @@ def result_payload(sess):
             "rejected": int(df["rejected"].sum()), "rejected_info": r.get("rejected_info"),
             "completed": int(df["completed"].sum()),
             "defects": n_def, "defect_pct": round(n_def / max(n_iv, 1) * 100, 1),
-            "warnings": int(df["is_warning"].sum()),
+            "warnings": int((df["is_warning"] & ~df["is_defect"]).sum()),
             "cities": int(df["city"].nunique()), "interviewers": int(df["inter"].nunique()),
             "dropped": r["n_dropped"], "period": engine.data_period(df),
             "processed_at": datetime.now().strftime("%d.%m.%Y %H:%M"),

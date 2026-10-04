@@ -22,13 +22,10 @@
       </div>
     </div>
     <nav id="nav" class="tabs">
-      <a data-page="overview" class="needs-result">Главная</a>
+      <a data-page="overview" class="needs-result">Итог</a>
       <a data-page="review" class="needs-result">Анкеты<span class="nav-badge" id="reviewBadge"></span></a>
       <a data-page="interviewers" class="needs-result">Интервьюеры</a>
       <a data-page="daily" class="needs-result">По дням</a>
-      <a data-page="defects" class="needs-result">Причины брака</a>
-      <a data-page="map" class="needs-result">Карта</a>
-      <a data-page="quotas" class="needs-result">Квоты</a>
     </nav>
     <div class="tb-right">
       <span class="tb-live" id="liveBox"></span>
@@ -46,6 +43,11 @@
         </button>
         <div class="menu-pop" id="morePop" hidden>
           <div class="menu-user" id="userBox"></div>
+          <div class="menu-sep"></div>
+          <div class="menu-label">Подробнее</div>
+          <button data-page="defects" class="needs-result-btn">Причины брака</button>
+          <button data-page="map" class="needs-result-btn">Карта GPS</button>
+          <button data-page="quotas" class="needs-result-btn">Квоты</button>
           <div class="menu-sep"></div>
           <button data-page="data">Источники данных</button>
           <button data-page="setup" class="lead-only">⚙ Настройка проверки</button>

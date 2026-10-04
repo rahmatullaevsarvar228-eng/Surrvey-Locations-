@@ -227,7 +227,7 @@ const SETUP_STEPS = [
 // hint — одна строка простыми словами: что на этой странице и зачем.
 const PAGES = {
   data: { title: "Источники данных", hint: "Google-таблицы, куда поступают анкеты. Подключите таблицу один раз — дальше программа сама забирает и проверяет новые анкеты.", render: pageData },
-  overview: { title: "Главная", hint: "Итог по проекту и что сделать сейчас. Нажимайте на цифры и строки — откроются подробности.", render: pageOverview },
+  overview: { title: "Итог", hint: "Сколько анкет, сколько брака и что сделать сейчас. Нажимайте на цифры — откроется список.", render: pageOverview },
   daily: { title: "По дням", hint: "Кто сколько анкет сделал в каждый день, выполнил ли норму и кто не работал. Брак в норму не засчитывается.", render: pageDaily },
   defects: { title: "Причины брака", hint: "Почему анкеты забракованы, в каком блоке анкеты ошибка, в каком городе и у кого.", render: pageDefects },
   map: { title: "Карта GPS", hint: "Где на самом деле проводились интервью: по плановым точкам, в своём ли городе, сколько анкет в каждой точке.", render: pageMap },
@@ -1265,8 +1265,16 @@ function pageReview(root) {
     ...["Брак", "Принять", "На перезвон"].map((d) => h("button", { class: `btn ${DECISION_CLASS[d]}`, onclick: async () => { await decide([...S.sel], d, comment.value); go("review"); } }, `${DECISION_ICON[d]} ${d}`)),
     h("button", { class: "btn ghost", onclick: async () => { await decide([...S.sel], "", ""); go("review"); } }, "Снять решение")) : null;
 
-  const seg = h("div", { class: "segmented" }, Object.entries(filters).map(([k, [label, fn]]) =>
-    h("button", { class: S.reviewFilter === k ? "on" : "", onclick: () => { S.reviewFilter = k; S.sel.clear(); go("review"); } }, `${label} · ${fmt(all.filter(fn).length)}`)));
+  // главные списки — кнопками; служебные (прозвон, прослушка, ТЗ) — в одном выпадающем списке
+  const EXTRA = ["call", "listen", "tech"];
+  const main = Object.entries(filters).filter(([k]) => !EXTRA.includes(k));
+  const extra = Object.entries(filters).filter(([k]) => EXTRA.includes(k));
+  const seg = h("div", { class: "row", style: "flex-wrap:wrap;gap:10px" },
+    h("div", { class: "segmented big" }, main.map(([k, [label, fn]]) =>
+      h("button", { class: S.reviewFilter === k ? "on" : "", onclick: () => { S.reviewFilter = k; S.sel.clear(); go("review"); } }, `${label} · ${fmt(all.filter(fn).length)}`))),
+    h("select", { class: EXTRA.includes(S.reviewFilter) ? "on" : "", onchange: (e) => { if (e.target.value) { S.reviewFilter = e.target.value; S.sel.clear(); go("review"); } } },
+      h("option", { value: "" }, "Другие списки…"),
+      extra.map(([k, [label, fn]]) => h("option", { value: k, selected: S.reviewFilter === k }, `${label} · ${fmt(all.filter(fn).length)}`))));
 
   const checkAll = h("input", { type: "checkbox", title: "Выбрать все", onclick: (e) => e.stopPropagation(), onchange: (e) => {
     rows.forEach((r) => (e.target.checked ? S.sel.add(r.pos) : S.sel.delete(r.pos)));
@@ -1276,18 +1284,16 @@ function pageReview(root) {
   const cols = [
     ...(canDecide ? [{ key: "chk", label: "", render: (r) => h("input", { type: "checkbox", checked: S.sel.has(r.pos),
       onclick: (e) => e.stopPropagation(), onchange: (e) => { e.target.checked ? S.sel.add(r.pos) : S.sel.delete(r.pos); updateCount(); } }) }] : []),
-    { key: "st", label: "", render: (r) => h("span", { class: `st ${ST[r.st].cls}`, title: ST[r.st].label }, ST[r.st].icon), sortVal: (r) => ({ brak: 3, warn: 2, ok: 1, tech: 0 })[r.st] },
-    { key: "risk", label: "Риск", num: true, render: (r) => riskTag(r.risk) },
+    { key: "st", label: "", render: (r) => h("span", { class: `st ${ST[r.st].cls}`, title: ST[r.st].label }, ST[r.st].icon), sortVal: (r) => ({ brak: 3, warn: 2, ok: 1, tech: 0 })[r.st] * 1000 + (r.risk || 0) },
     { key: "id", label: "ID" }, { key: "city", label: "Город" }, { key: "inter", label: "Интервьюер" },
     { key: "start", label: "Когда", sortVal: (r) => r.start && r.start.split(/[. :]/).reverse().join("") },
     { key: "why", label: "Почему", wrap: true, render: (r) => r.why ? h("div", {}, h("b", {}, r.why), h("div", { class: "muted small" }, r.what),
       S.reviewFilter === "listen" ? h("div", { class: "small", style: "color:var(--accent)" }, r.listen) : null)
       : S.reviewFilter === "listen" ? h("span", { class: "small", style: "color:var(--accent)" }, r.listen)
       : (r.technical ? h("span", { class: "muted" }, "техническая запись") : "") },
-    { key: "block", label: "Блок", wrap: true },
     { key: "decision", label: "Решение", render: (r) => h("div", {}, decisionTag(r.decision), r.decision_comment ? h("div", { class: "muted small" }, `${r.decision_comment} (${r.decision_by})`) : null) },
   ];
-  const tbl = table(cols, rows, { tools: seg, height: 620, onClick: (r) => openAnketa(r.pos), sortKey: "risk", asc: false,
+  const tbl = table(cols, rows, { tools: seg, height: 620, onClick: (r) => openAnketa(r.pos), sortKey: "st", asc: false,
     rowClass: (r) => (r.st === "brak" ? "row-RED" : r.st === "warn" ? "row-YELLOW" : ""),
     empty: S.reviewFilter === "todo" ? "Все подозрительные анкеты разобраны 🎉" : "Нет анкет" });
   if (canDecide) {
@@ -1503,13 +1509,14 @@ function showHelp() {
     st("c-warn", "На проверку", "Есть сигнал, но это ещё не брак: послушайте аудио или перезвоните респонденту, потом поставьте решение."),
     st("c-brak", "Брак", "Нарушение, при котором интервью не могло пройти правильно: слишком быстро, копия, две анкеты одновременно, повтор респондента, не в своём городе, «1» от аудиоконтроля. Руководитель может принять анкету, если это ошибка."),
     h("h3", {}, "Каждый день — 4 шага"),
-    step(1, "Главная", "Светофор и список «Что сделать сейчас»."),
+    step(1, "Итог", "Светофор и список «Что сделать сейчас». Нажмите на цифру брака — откроется список."),
     step(2, "Анкеты → «Нужно решить»", "Откройте анкету: там написано, почему она отмечена. Нажмите «Брак», «Принять» или «На перезвон»."),
     step(3, "Интервьюеры", "Кто в красной зоне — карточка интервьюера в Word для инструктажа."),
     step(4, "По дням", "Кто не работал и кто не выполнил норму. Брак и прерванные анкеты в норму не идут."),
     h("p", { class: "muted" }, "Видео-задания (ТЗ) и анкеты, прерванные в начале (отсев), — не брак: программа находит их сама."),
     S.state.user && ["lead", "admin"].includes(S.state.user.role)
-      ? h("p", { class: "muted" }, "Пороги и правила — в меню ⋯ → «Настройка проверки». Обычно менять ничего не нужно.") : null), true);
+      ? h("p", { class: "muted" }, "Причины брака, карта GPS, отчёты Excel — в меню ⋯. Пороги и правила — ⋯ → «Настройка проверки»; обычно менять ничего не нужно.")
+      : h("p", { class: "muted" }, "Причины брака, карта GPS и отчёты — в меню ⋯.")), true);
 }
 
 function openModal(title, body, wide) {

@@ -242,10 +242,12 @@ function headline(anks) {
   if (c.brak && byCity.length && byCity[0][1] > 0) parts.push(`Больше всего — ${byCity[0][0]} (${fmt(byCity[0][1], 0)}%).`);
   if (top) parts.push(`Главная причина: «${label(top[0])}».`);
   const worst = byInter.filter((x) => levelOf(x[1]) === "RED").map((x) => x[0]);
-  // есть интервьюер в красной зоне — «всё нормально» писать нельзя
-  if (worst.length && lvl === "GREEN") lvl = "YELLOW";
+  // есть интервьюер с большой долей брака — «всё нормально» писать нельзя
+  const weak = byInter.filter((x) => levelOf(x[1]) !== "GREEN").map((x) => x[0]);
+  if (weak.length && lvl === "GREEN") lvl = "YELLOW";
   const title = { RED: "Много брака — нужно вмешаться", YELLOW: "Есть проблемы — стоит посмотреть", GREEN: "Поле идёт нормально" }[lvl];
   if (worst.length) parts.push(`В красной зоне: ${worst.slice(0, 4).join(", ")}${worst.length > 4 ? ` и ещё ${worst.length - 4}` : ""}.`);
+  else if (weak.length) parts.push(`Много брака у: ${weak.slice(0, 4).join(", ")}${weak.length > 4 ? ` и ещё ${weak.length - 4}` : ""}.`);
   return h("div", { class: `hero ${lvl}` },
     h("div", { class: "hero-light" }, h("i", { class: "r" }), h("i", { class: "y" }), h("i", { class: "g" })),
     h("div", {}, h("div", { class: "hero-title" }, title), h("div", { class: "hero-text" }, parts.join(" "))));
@@ -254,9 +256,9 @@ function headline(anks) {
 function pageOverview(root) {
   if (!S.result) return noResult(root);
   const R = S.result, s = R.summary;
-  const anks = scoped();
+  // Итог — всегда по всему проекту, без фильтров: цифры не «прыгают»
+  const anks = R.anketas;
   const c = counts(anks);
-  root.append(filterBar("overview"));
   // новичку инструкция открывается сама — один раз
   try { if (!localStorage.getItem("helpSeen")) { localStorage.setItem("helpSeen", "1"); setTimeout(showHelp, 400); } } catch (e) { /* без хранилища — просто не показываем */ }
   const dc = dataChecks();
@@ -264,34 +266,24 @@ function pageOverview(root) {
   if (R.rule_errors.length) root.append(h("div", { class: "notice bad" }, h("div", {}, h("b", {}, "Некоторые правила не проверены: "), R.rule_errors.join("; "))));
   root.append(headline(anks));
 
-  // Четыре главные цифры — одна строка, без лишнего
+  // Четыре главные цифры; нажатие открывает список анкет
+  const open = (f) => () => { S.f = {}; S.reviewFilter = f; go("review"); };
   root.append(h("div", { class: "stats big" },
-    tile("Всего анкет", fmt(c.iv), c.tech ? `+ ${fmt(c.tech)} видео/ТЗ (не считаются)` : s.period || ""),
-    tile("Брак", fmt(c.brak), `${fmt(pct(c.brak, c.iv), 1)}% — нажмите, почему`, "red", () => go("defects")),
-    tile("На проверку", fmt(c.warn), "послушать аудио или перезвонить", "yellow", () => { S.reviewFilter = "warn"; go("review"); }),
-    tile("Без замечаний", fmt(c.ok), `${fmt(pct(c.ok, c.iv), 1)}% анкет`, "green")));
+    tile("Всего анкет", fmt(c.iv), c.tech ? `+ ${fmt(c.tech)} видео/ТЗ (не считаются)` : s.period || "", "", open("all")),
+    tile("Брак", fmt(c.brak), `${fmt(pct(c.brak, c.iv), 1)}% — открыть список`, "red", open("brak")),
+    tile("На проверку", fmt(c.warn), "послушать аудио или перезвонить", "yellow", open("warn")),
+    tile("Без замечаний", fmt(c.ok), `${fmt(pct(c.ok, c.iv), 1)}% анкет`, "green", open("ok"))));
 
   root.append(h("div", { class: "grid-2 wide-left" },
-    card("Что сделать сейчас", "Самое важное по проекту. Нажмите на строку — откроется нужный экран.", todoList(anks)),
+    card("Что сделать сейчас", null, todoList(anks)),
     lastDayCard()));
 
   root.append(h("div", { class: "grid-2" },
-    card("Почему брак", "Сколько анкет с каждой причиной. Нажмите на причину — подробности.",
+    card("Почему брак", null,
       hbars(reasonCounts(anks.filter(isBrak), "defect").map(([code, n]) => ({ label: label(code), value: n, code,
         tip: () => [tipVal(fmt(n), "анкет с браком"), h("div", { class: "muted" }, `${fmt(pct(n, c.brak), 0)}% всего брака`)] })),
-      { color: "c-brak", limit: 6, onClick: (it) => { S.defReason = it.code; go("defects"); }, empty: "Брака нет" })),
-    card("Кто работает хуже всех", "Интервьюеры с наибольшей долей брака. Нажмите — карточка интервьюера.",
-      riskList(anks))));
-
-  root.append(h("div", { class: "grid-2" },
-    card("Анкеты по дням", "Нажмите на день — все экраны покажут только его.",
-      legend([["c-brak", "Брак"], ["c-warn", "На проверку"], ["c-ok", "Без замечаний"]]),
-      dayColumns(scoped().filter((a) => matches(a, "date")), (d) => setFilter("date", F().date === d ? null : d, "overview"))),
-    card("Брак по городам", "Доля брака среди анкет города. Нажмите на город, чтобы смотреть только его.",
-      cityBars([...groupBy(anks.filter((a) => !a.technical), "city")].map(([city, v]) => {
-        const cc = counts(v);
-        return { label: city, sub: v[0].region !== city ? v[0].region : "", value: pct(cc.brak, cc.iv), n: cc.iv, cc, active: F().city === city };
-      }).sort((a, b) => b.value - a.value)))));
+      { color: "c-brak", limit: 5, onClick: (it) => { S.defReason = it.code; go("defects"); }, empty: "Брака нет" })),
+    card("Кто работает хуже всех", null, riskList(anks))));
 
   root.append(h("details", { class: "card how" },
     h("summary", {}, "Как посчитано и отчёты"),

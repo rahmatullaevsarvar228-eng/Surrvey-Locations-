@@ -1054,7 +1054,9 @@ def summarize_interviewers(df, cfg, repetition, patterns=()):
         n = len(g)
         n_def = int(g_all["is_defect"].sum())
         pct = round(n_def / n * 100, 1) if n else (100.0 if n_def else 0.0)
-        codes = Counter(code for xs in g_all["issues"] for code, sev, _ in xs if sev == DEFECT)
+        # причины — только у забракованных интервью (без видео-заданий), чтобы
+        # совпадали с цифрой брака
+        codes = Counter(code for xs in g.loc[g["is_defect"], "issues"] for code, sev, _ in xs if sev == DEFECT)
         top = ", ".join(f"{ISSUE_LABELS.get(c, c)} ×{k}" for c, k in codes.most_common(3))
         city = g["city"].mode()
         rep = rep_by_inter.get(inter)
@@ -1067,7 +1069,8 @@ def summarize_interviewers(df, cfg, repetition, patterns=()):
             "% брака": pct,
             "Статус": status_for_pct(pct, red, yellow),
             "Тех. записей": int(g_all["technical"].sum()),
-            "Предупреждений": int(g_all["is_warning"].sum()),
+            # «на проверку» — есть сигнал, но не брак (как на экране)
+            "Предупреждений": int((g["is_warning"] & ~g["is_defect"]).sum()),
             "Риск (средний)": int(round(g["risk"].mean())) if n else 0,
             "Регион": g_all["region"].mode().iloc[0] if "region" in g_all and len(g_all) else "—",
             "Повтор значения": f"{rep['Самое частое значение']} — {rep['% повтора']}%" if rep else "",
@@ -1083,9 +1086,12 @@ def summarize_interviewers(df, cfg, repetition, patterns=()):
 # Сводки для интерфейса
 # ─────────────────────────────────────────────────────────────────────────
 def issue_breakdown(df, severity):
-    n_base = int(df["is_defect"].sum()) if severity == DEFECT else len(df)
+    # Только анкеты своей группы: причины брака — у брака, причины «на
+    # проверку» — у анкет на проверку (видео-задания сюда не попадают)
+    rows = df[df["is_defect"]] if severity == DEFECT else df[df["is_warning"] & ~df["is_defect"]]
+    n_base = len(rows)
     counts = Counter()
-    for xs in df["issues"]:
+    for xs in rows["issues"]:
         for code in {c for c, s, _ in xs if s == severity}:
             counts[code] += 1
     return [{"Причина": ISSUE_LABELS.get(code, code), "code": code, "Анкет": k,

@@ -572,3 +572,31 @@ def test_listen_sample_and_interviewer_cards(tmp_path, demo_bytes):
     assert any("Что исправить" in c.text for t in doc.tables for c in t.rows[0].cells)
     doc = Document(io.BytesIO(client.get("/api/export/cards").data))
     assert sum("КАРТОЧКА ИНТЕРВЬЮЕРА" in p.text for p in doc.paragraphs) == len(inters)
+
+
+def test_counts_agree_everywhere(tmp_path, demo_bytes):
+    """Одна и та же цифра брака и «на проверку» на экране, в сводке, у
+    интервьюеров, по дням, в Excel и в Word."""
+    from anketa_qc import daily
+    app = create_app(tmp_path, client_factory=FakeClient)
+    client = app.test_client()
+    login(client, "boss")
+    client.post("/api/source/file", data={"file": (io.BytesIO(demo_bytes), "demo.xlsx")},
+                content_type="multipart/form-data")
+    p = client.post("/api/run", json={}).get_json()
+    s = p["summary"]
+    ank = [a for a in p["anketas"] if not a["technical"]]
+    brak = sum(1 for a in ank if a["defect"])
+    check = sum(1 for a in ank if a["warning"] and not a["defect"])
+    assert brak > 0 and check > 0
+    assert s["defects"] == brak == sum(x["Брак"] for x in p["interviewers"])
+    assert s["warnings"] == check == sum(x["Предупреждений"] for x in p["interviewers"])
+    assert s["interviews"] == len(ank) == sum(x["Анкет"] for x in p["interviewers"])
+    sess = app.config["SESSION"]
+    rows = daily.table(sess.result, sess.config, sess.decisions_by_pos())[0]
+    assert sum(r["brak"] for r in rows) == brak
+    xl = pd.ExcelFile(io.BytesIO(client.get("/api/export/full").data))
+    assert int(pd.read_excel(xl, sheet_name="Интервьюеры")["Брак"].sum()) == brak
+    from docx import Document
+    doc = Document(io.BytesIO(client.get("/api/export/word").data))
+    assert f"({brak} из {len(ank)} анкет)" in "\n".join(par.text for par in doc.paragraphs)
