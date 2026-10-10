@@ -104,7 +104,7 @@ export default function Emergency() {
 
       <div className="kpis">
         {ai?.ok && <div className="kpi ai">
-          <div className="kpi-label">{t('ai_rescued')}</div>
+          <div className="kpi-label">{dl ? t('ai_rescued') : `${t('ai_short')} · ${t('m_total')}`}</div>
           <div className="kpi-val">✓ {ai.metrics?.umumiy_kechikish_daq} {t('min')}</div>
           {!live && data.tez_hisob && <div className="small">{t('ai_rescued_quick', {
             s: data.tez_hisob.soniya, d: data.tez_hisob.umumiy_kechikish, e: data.tez_hisob.xatolar })}</div>}

@@ -20,7 +20,7 @@ from engine import (preset, scenario_dict, investment_ranking, DEMO_SEED,  # noq
                     recovery_time)
 from engine.run import fifo_result, ai_result  # noqa: E402
 
-CACHE = os.path.join(ROOT, "data", "cache")
+CACHE = os.environ.get("VDT_CACHE", os.path.join(ROOT, "data", "cache"))
 OBJECTIVES = ("umumiy", "ustuvorlik")
 
 
