@@ -1,0 +1,514 @@
+{
+ "oddiy": {
+  "rows": [
+   {
+    "seed": 1,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 593,
+     "fifo": 641,
+     "pct": -7.5
+    },
+    "ustuvorlik": {
+     "ai": 864,
+     "fifo": 1131,
+     "pct": -23.6
+    }
+   },
+   {
+    "seed": 2,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 484,
+     "fifo": 501,
+     "pct": -3.4
+    },
+    "ustuvorlik": {
+     "ai": 885,
+     "fifo": 1067,
+     "pct": -17.1
+    }
+   },
+   {
+    "seed": 3,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 743,
+     "fifo": 852,
+     "pct": -12.8
+    },
+    "ustuvorlik": {
+     "ai": 1219,
+     "fifo": 2386,
+     "pct": -48.9
+    }
+   },
+   {
+    "seed": 4,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 517,
+     "fifo": 601,
+     "pct": -14.0
+    },
+    "ustuvorlik": {
+     "ai": 1212,
+     "fifo": 1523,
+     "pct": -20.4
+    }
+   },
+   {
+    "seed": 5,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 648,
+     "fifo": 662,
+     "pct": -2.1
+    },
+    "ustuvorlik": {
+     "ai": 910,
+     "fifo": 1658,
+     "pct": -45.1
+    }
+   },
+   {
+    "seed": 6,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 374,
+     "fifo": 386,
+     "pct": -3.1
+    },
+    "ustuvorlik": {
+     "ai": 661,
+     "fifo": 786,
+     "pct": -15.9
+    }
+   },
+   {
+    "seed": 7,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 453,
+     "fifo": 468,
+     "pct": -3.2
+    },
+    "ustuvorlik": {
+     "ai": 702,
+     "fifo": 958,
+     "pct": -26.7
+    }
+   },
+   {
+    "seed": 8,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 537,
+     "fifo": 683,
+     "pct": -21.4
+    },
+    "ustuvorlik": {
+     "ai": 941,
+     "fifo": 1781,
+     "pct": -47.2
+    }
+   },
+   {
+    "seed": 9,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 563,
+     "fifo": 657,
+     "pct": -14.3
+    },
+    "ustuvorlik": {
+     "ai": 1073,
+     "fifo": 1683,
+     "pct": -36.2
+    }
+   },
+   {
+    "seed": 10,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 281,
+     "fifo": 295,
+     "pct": -4.7
+    },
+    "ustuvorlik": {
+     "ai": 532,
+     "fifo": 757,
+     "pct": -29.7
+    }
+   }
+  ],
+  "xulosa": {
+   "umumiy": {
+    "ortacha": -8.7,
+    "min": -21.4,
+    "max": -2.1,
+    "n": 10
+   },
+   "ustuvorlik": {
+    "ortacha": -31.1,
+    "min": -48.9,
+    "max": -15.9,
+    "n": 10
+   }
+  },
+  "tupik": 0
+ },
+ "avariya": {
+  "rows": [
+   {
+    "seed": 1,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 647,
+     "fifo": 689,
+     "pct": -6.1
+    },
+    "ustuvorlik": {
+     "ai": 830,
+     "fifo": 1259,
+     "pct": -34.1
+    }
+   },
+   {
+    "seed": 2,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 650,
+     "fifo": 736,
+     "pct": -11.7
+    },
+    "ustuvorlik": {
+     "ai": 1221,
+     "fifo": 1536,
+     "pct": -20.5
+    }
+   },
+   {
+    "seed": 3,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 1071,
+     "fifo": 1244,
+     "pct": -13.9
+    },
+    "ustuvorlik": {
+     "ai": 2026,
+     "fifo": 3136,
+     "pct": -35.4
+    }
+   },
+   {
+    "seed": 4,
+    "fifo_tupik": true,
+    "stuck": 15,
+    "umumiy": {
+     "ai": 830,
+     "fifo": null,
+     "pct": null
+    },
+    "ustuvorlik": {
+     "ai": 1584,
+     "fifo": null,
+     "pct": null
+    }
+   },
+   {
+    "seed": 5,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 636,
+     "fifo": 662,
+     "pct": -3.9
+    },
+    "ustuvorlik": {
+     "ai": 1300,
+     "fifo": 1658,
+     "pct": -21.6
+    }
+   },
+   {
+    "seed": 6,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 975,
+     "fifo": 1033,
+     "pct": -5.6
+    },
+    "ustuvorlik": {
+     "ai": 1386,
+     "fifo": 1693,
+     "pct": -18.1
+    }
+   },
+   {
+    "seed": 7,
+    "fifo_tupik": true,
+    "stuck": 15,
+    "umumiy": {
+     "ai": 722,
+     "fifo": null,
+     "pct": null
+    },
+    "ustuvorlik": {
+     "ai": 1230,
+     "fifo": null,
+     "pct": null
+    }
+   },
+   {
+    "seed": 8,
+    "fifo_tupik": true,
+    "stuck": 15,
+    "umumiy": {
+     "ai": 1026,
+     "fifo": null,
+     "pct": null
+    },
+    "ustuvorlik": {
+     "ai": 1514,
+     "fifo": null,
+     "pct": null
+    }
+   },
+   {
+    "seed": 9,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 664,
+     "fifo": 982,
+     "pct": -32.4
+    },
+    "ustuvorlik": {
+     "ai": 1266,
+     "fifo": 2324,
+     "pct": -45.5
+    }
+   },
+   {
+    "seed": 10,
+    "fifo_tupik": true,
+    "stuck": 15,
+    "umumiy": {
+     "ai": 673,
+     "fifo": null,
+     "pct": null
+    },
+    "ustuvorlik": {
+     "ai": 1322,
+     "fifo": null,
+     "pct": null
+    }
+   }
+  ],
+  "xulosa": {
+   "umumiy": {
+    "ortacha": -12.3,
+    "min": -32.4,
+    "max": -3.9,
+    "n": 6
+   },
+   "ustuvorlik": {
+    "ortacha": -29.2,
+    "min": -45.5,
+    "max": -18.1,
+    "n": 6
+   }
+  },
+  "tupik": 4
+ },
+ "osish30": {
+  "rows": [
+   {
+    "seed": 1,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 1297,
+     "fifo": 1338,
+     "pct": -3.1
+    },
+    "ustuvorlik": {
+     "ai": 2331,
+     "fifo": 3102,
+     "pct": -24.9
+    }
+   },
+   {
+    "seed": 2,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 1225,
+     "fifo": 1225,
+     "pct": 0.0
+    },
+    "ustuvorlik": {
+     "ai": 2584,
+     "fifo": 2731,
+     "pct": -5.4
+    }
+   },
+   {
+    "seed": 3,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 1445,
+     "fifo": 1547,
+     "pct": -6.6
+    },
+    "ustuvorlik": {
+     "ai": 3206,
+     "fifo": 4893,
+     "pct": -34.5
+    }
+   },
+   {
+    "seed": 4,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 834,
+     "fifo": 834,
+     "pct": 0.0
+    },
+    "ustuvorlik": {
+     "ai": 1911,
+     "fifo": 1960,
+     "pct": -2.5
+    }
+   },
+   {
+    "seed": 5,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 990,
+     "fifo": 998,
+     "pct": -0.8
+    },
+    "ustuvorlik": {
+     "ai": 2125,
+     "fifo": 2374,
+     "pct": -10.5
+    }
+   },
+   {
+    "seed": 6,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 1171,
+     "fifo": 1281,
+     "pct": -8.6
+    },
+    "ustuvorlik": {
+     "ai": 2282,
+     "fifo": 2581,
+     "pct": -11.6
+    }
+   },
+   {
+    "seed": 7,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 900,
+     "fifo": 900,
+     "pct": 0.0
+    },
+    "ustuvorlik": {
+     "ai": 1646,
+     "fifo": 1894,
+     "pct": -13.1
+    }
+   },
+   {
+    "seed": 8,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 1089,
+     "fifo": 1244,
+     "pct": -12.5
+    },
+    "ustuvorlik": {
+     "ai": 2400,
+     "fifo": 3114,
+     "pct": -22.9
+    }
+   },
+   {
+    "seed": 9,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 1192,
+     "fifo": 1322,
+     "pct": -9.8
+    },
+    "ustuvorlik": {
+     "ai": 2289,
+     "fifo": 2706,
+     "pct": -15.4
+    }
+   },
+   {
+    "seed": 10,
+    "fifo_tupik": false,
+    "stuck": 0,
+    "umumiy": {
+     "ai": 799,
+     "fifo": 802,
+     "pct": -0.4
+    },
+    "ustuvorlik": {
+     "ai": 2240,
+     "fifo": 2336,
+     "pct": -4.1
+    }
+   }
+  ],
+  "xulosa": {
+   "umumiy": {
+    "ortacha": -4.2,
+    "min": -12.5,
+    "max": 0.0,
+    "n": 10
+   },
+   "ustuvorlik": {
+    "ortacha": -14.5,
+    "min": -34.5,
+    "max": -2.5,
+    "n": 10
+   }
+  },
+  "tupik": 0
+ },
+ "validator": {
+  "jadvallar": 86,
+  "buzilishlar": 0,
+  "ai_soniya": 8.0
+ }
+}
