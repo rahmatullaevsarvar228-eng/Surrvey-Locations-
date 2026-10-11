@@ -29,6 +29,7 @@ class Analysis:
     findings: list
     reconcile: dict
     reasons: list = field(default_factory=list)
+    costs: list = field(default_factory=list)       # repository CostRecord (with primary documents)
 
     @property
     def in_scope(self) -> bool:
@@ -63,6 +64,7 @@ class Service:
         rec_ = engine.reconcile(p, as_of, s)
         a = Analysis(rec, p, as_of, res, sch, jn, car, status, findings, rec_)
         a.reasons = reconcile_reasons(a)
+        a.costs = self.repo.costs(pid)
         return a
 
     def analyze_all(self, as_of: Optional[date] = None) -> list[Analysis]:
