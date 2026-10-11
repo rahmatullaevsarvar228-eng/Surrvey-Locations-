@@ -6,6 +6,7 @@ import logging
 import sys
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramUnauthorizedError
 from aiogram.types import BotCommand
 
 from app.core.config import get_settings
@@ -29,7 +30,12 @@ async def run() -> None:
     bot = Bot(st.bot_token)
     dp = Dispatcher()
     dp.include_router(build_router(repo, wc, st))
-    await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in COMMANDS])
+    try:
+        await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in COMMANDS])
+    except TelegramUnauthorizedError:
+        await bot.session.close()
+        sys.exit("Telegram tokenni qabul qilmadi (Unauthorized). @BotFather → /mybots → bot → API Token dan "
+                 "yangi tokenni oling va .env dagi BOT_TOKEN= ga bo‘sh joysiz, qo‘shtirnoqsiz yozing.")
     sch = make_scheduler(bot, repo, wc, st)
     sch.start()
     try:

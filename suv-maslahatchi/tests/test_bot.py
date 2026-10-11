@@ -318,3 +318,20 @@ def test_main_requires_token(token: str, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(main, "get_settings", lambda: Settings(bot_token=token))
     with pytest.raises(SystemExit, match="BOT_TOKEN"):
         asyncio.run(main.run())
+
+
+def test_main_bad_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from app.bot import main
+
+    class Unauthorized(RecordingSession):
+        async def make_request(self, bot: Bot, method: TelegramMethod[Any], timeout: int | None = None) -> Any:
+            from aiogram.exceptions import TelegramUnauthorizedError
+            raise TelegramUnauthorizedError(method=method, message="Unauthorized")
+
+    real_bot = main.Bot
+    monkeypatch.setattr(main, "get_settings", lambda: Settings(bot_token="1:x", SUV_DB_URL="sqlite:///:memory:"))
+    monkeypatch.setattr(main, "Bot", lambda token: real_bot(token, session=Unauthorized()))
+    with pytest.raises(SystemExit, match="Unauthorized"):
+        asyncio.run(main.run())
