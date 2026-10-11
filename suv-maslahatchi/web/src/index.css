@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dizayn tokenlari (CLAUDE.md). RGB uchlik — Tailwind alfa bilan ishlashi uchun. */
+:root {
+  --bg: 244 247 246; --surface: 255 255 255; --ink: 20 32 28; --muted: 91 107 102;
+  --water: 31 111 178; --soil: 138 90 59; --leaf: 60 141 79; --sun: 217 146 46; --alert: 194 65 58;
+  --fs-base: 16px; --fs-kpi: 40px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: 14 21 19; --surface: 22 32 29; --ink: 230 238 235; --muted: 147 165 160;
+    --water: 90 162 224; --soil: 192 139 102; --leaf: 108 194 131; --sun: 240 180 90; --alert: 240 106 98;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: 14 21 19; --surface: 22 32 29; --ink: 230 238 235; --muted: 147 165 160;
+  --water: 90 162 224; --soil: 192 139 102; --leaf: 108 194 131; --sun: 240 180 90; --alert: 240 106 98;
+  color-scheme: dark;
+}
+/* Proyektor rejimi: ?stage=1 */
+:root[data-stage="1"] { --fs-base: 20px; --fs-kpi: 64px; }
+:root[data-stage="1"] .dev-only { display: none !important; }
+:root[data-stage="1"] .bucket-svg { max-width: 420px; }
+
+html { font-size: var(--fs-base); }
+body {
+  @apply bg-bg text-ink font-sans antialiased;
+  margin: 0;
+}
+.num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.kpi { font-size: var(--fs-kpi); line-height: 1.05; }
+
+:focus-visible { outline: 3px solid rgb(var(--water)); outline-offset: 2px; border-radius: 6px; }
+
+.card { @apply bg-surface rounded-card border border-ink/10 p-4; }
+.btn {
+  @apply inline-flex items-center gap-2 rounded-card px-3 py-2 font-medium border border-ink/15
+         bg-surface hover:bg-ink/5 disabled:opacity-50;
+}
+.btn-primary { @apply bg-water text-bg border-water hover:bg-water/90; }
+.field-label { @apply block text-sm text-muted mb-1; }
+.input {
+  @apply w-full rounded-card border border-ink/20 bg-surface px-3 py-2 text-ink;
+}
+
+@keyframes drop-fall { from { transform: translateY(0); opacity: 1; } to { transform: translateY(var(--fall, 60px)); opacity: 0; } }
+@keyframes rain-fall { from { transform: translateY(-20px); opacity: 0; } 30% { opacity: 1; } to { transform: translateY(var(--fall, 60px)); opacity: 0; } }
+.anim-drop { animation: drop-fall 0.9s ease-in infinite; }
+.anim-rain { animation: rain-fall 0.7s linear infinite; }
+.level { transition: y 240ms ease, height 240ms ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-drop, .anim-rain { animation: none; }
+  .level { transition: none; }
+}

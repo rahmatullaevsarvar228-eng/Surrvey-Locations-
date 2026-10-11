@@ -5,7 +5,10 @@
     "authors": "Mualliflar: Saynatov Yodgor, Raxmatullayev Sarvar",
     "sample_label": "Namuna (sintetik)"
   },
-  "crop": { "paxta": "Paxta", "bugdoy": "Kuzgi bug‘doy" },
+  "crop": {
+    "paxta": "Paxta",
+    "bugdoy": "Kuzgi bug‘doy"
+  },
   "soil": {
     "yengil": "Yengil (qumloq)",
     "orta": "O‘rta (changli, bo‘z tuproq)",
@@ -16,7 +19,11 @@
     "orta": "Siqsangiz kesak bo‘ladi, ezsangiz uqalanadi",
     "ogir": "Siqsangiz yopishqoq, ip kabi cho‘ziladi"
   },
-  "method": { "egat": "Egatlab", "yomgir": "Yomg‘irlatib", "tomchi": "Tomchilatib" },
+  "method": {
+    "egat": "Egatlab",
+    "yomgir": "Yomg‘irlatib",
+    "tomchi": "Tomchilatib"
+  },
   "stage": {
     "ekilmagan": "ekilmagan",
     "boshlangich": "boshlang‘ich",
@@ -135,6 +142,55 @@
     "theme": "Mavzu",
     "lang": "Til",
     "qr_title": "Telegram botni sinab ko‘ring",
-    "science_title": "Ilmiy asos va cheklovlar"
+    "science_title": "Ilmiy asos va cheklovlar",
+    "day_irrigate": "Bugun sug‘oring",
+    "day_wait": "{k} kundan keyin sug‘orish",
+    "day_ok": "Sug‘orish shart emas",
+    "kc_uz": "Mahalliy Kc (Farg‘ona, 2020)",
+    "kc_fao": "FAO-56 jadval Kc",
+    "habit_mm_hint": "1 mm = 10 m³/ga.",
+    "diff_note": "Bu — model ichidagi taqqoslash (bir xil ob-havo, bir xil tuproq), dalada o‘lchangan tejash emas."
+  },
+  "science": {
+    "model_h": "Model: FAO-56 kunlik tuproq-suv balansi",
+    "model_p": [
+      "Ekin suv iste’moli: ETc = Kc × ET0 (mm/kun). ET0 — Penman–Monteith bo‘yicha etalon bug‘lanish (Open-Meteo).",
+      "Ildiz zonasidagi tanqislik: Drᵢ = Drᵢ₋₁ − Pe − I + ETc (0 ≤ Dr ≤ TAW).",
+      "Umumiy foydali suv: TAW = θ_foydali (mm/m) × Zr (m); stresssiz qism: RAW = p × TAW.",
+      "Sug‘orish qachon: Dr ≥ RAW (yoki usulning bir martalik me’yori). Netto = Dr, brutto = Dr / samaradorlik. 1 mm = 10 m³/ga."
+    ],
+    "params_h": "Parametrlar va manbalar",
+    "params": [
+      "Kc (asosiy): Farg‘ona vodiysida o‘lchangan — paxta 0,15 / 1,15 / 0,45; kuzgi bug‘doy 0,26 / 1,03 / 0,56 (Kenjabaev va boshq., 2020; 2009–2011 dala tajribalari).",
+      "Kc (muqobil): FAO-56, 12-jadval; iqlim tuzatmasi (62-tenglama) faqat shu to‘plamga qo‘llanadi.",
+      "Bosqich davomiyligi: FAO-56, 11-jadval.",
+      "Ildiz chuqurligi Zr va p: FAO-56, 22-jadval; Zr rivojlanish bosqichida 0,2 m dan chiziqli o‘sadi.",
+      "Tuproq foydali suvi: yengil 90, o‘rta 170, og‘ir 120 mm/m (FAO-56).",
+      "Sug‘orish samaradorligi: egat 0,60, yomg‘irlatish 0,75, tomchilatish 0,90 — tipik qiymatlar, foydalanuvchi o‘zgartira oladi.",
+      "Ob-havo: Open-Meteo — demo uchun arxiv (ERA5 qayta tahlil), botda prognoz."
+    ],
+    "gap_h": "Validatsiya bo‘shlig‘i — biz hali nimani isbotlamaganmiz",
+    "gap": [
+      "Maslahatlar hali dalada tekshirilmagan: tuproq namligi o‘lchovlari, suv hisoblagichi yoki hosil bilan solishtirilmagan.",
+      "Bosqich davomiyligi O‘zbekiston navlari va ekish muddatlari uchun kalibrlanmagan (FAO jadvalida O‘zbekiston qatori yo‘q).",
+      "Grunt suvidan kapillyar ko‘tarilish hisobga olinmaydi. Grunt suvi sayoz dalalarda (masalan, Farg‘ona vodiysining ayrim qismlari) model suv talabini oshirib ko‘rsatishi mumkin.",
+      "Sho‘r yuvish uchun qo‘shimcha suv (leaching) va sho‘rlanish stressi hisobga olinmaydi.",
+      "Samarali yomg‘ir soddalashtirilgan (kichik yomg‘ir hisobga olinmaydi, yuza oqimi modellashtirilmagan).",
+      "ET0 setka katagi uchun hisoblangan; aniq dala mikroiqlimi farq qilishi mumkin.",
+      "Tuproq turi qo‘l testi bilan tanlanadi — xato tanlov TAW ni o‘zgartiradi.",
+      "«Odatiy jadval» bilan taqqoslash — model ichidagi taqqoslash; tejash foizini dalada o‘lchamaganmiz va e’lon qilmaymiz."
+    ],
+    "plan_h": "Pilot rejasi",
+    "plan": [
+      "Bir nechta dalada mavsum davomida tuproq namligini o‘lchash (datchik yoki gravimetrik namuna) va model Dr bilan solishtirish.",
+      "Berilgan suvni hisoblagich bilan o‘lchash.",
+      "Natija asosida hududiy kalibrlash koeffitsienti (kc_scale) va bosqich davomiyligini aniqlash."
+    ],
+    "refs_h": "Adabiyotlar",
+    "refs": [
+      "Allen R.G., Pereira L.S., Raes D., Smith M. (1998). Crop evapotranspiration — Guidelines for computing crop water requirements. FAO Irrigation and Drainage Paper 56. Rim: FAO.",
+      "Kenjabaev Sh. va boshq., 2020 — Farg‘ona vodiysida o‘lchangan paxta va kuzgi bug‘doy Kc qiymatlari (2009–2011 dala tajribalari).",
+      "Open-Meteo: Historical Weather API va Forecast API (open-meteo.com)."
+    ]
   }
 }
