@@ -42,8 +42,8 @@ tests/                    pytest: engine, servislar, API, bot oqimi (tarmoqsiz)
 
 ## Validatsiya (TZ §6)
 
-`python scripts/validate_kenjabaev.py [cache_id]` — mavsum ET0 863 mm ga normallashtirilganda potensial ETc 690–730 mm;
-Kenjabaev (2020) o‘lchagan 560 ± 50 mm dan ~25–30% yuqori. Test: `tests/test_engine.py::test_validation_ratio_reproduces_tz6`.
+`python scripts/validate_kenjabaev.py fargona_2025` — haqiqiy Farg‘ona 2025 mavsumi shakli, ET0 863 mm ga normallashtirilganda
+potensial ETc 681–705 mm; Kenjabaev (2020) o‘lchagan 560 ± 50 mm dan ~22–26% yuqori (TZ dagi 25–30% sintetik shakl bilan edi). Test: `tests/test_engine.py::test_validation_ratio_reproduces_tz6`.
 
 ## Halollik qoidalari
 

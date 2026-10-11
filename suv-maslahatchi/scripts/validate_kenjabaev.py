@@ -28,11 +28,13 @@ def main(cache_id: str) -> None:
         planting = c.meta.planting + timedelta(days=shift)
         f = se.Field(crop="paxta", soil="orta", method="egat", planting=planting)
         win = c.window(planting, planting + timedelta(days=se.season_length("paxta") - 1))
+        full = len(win) == se.season_length("paxta")
         k = ET0_MEASURED / sum(d.et0 for d in win)
         etc = se.potential_etc(f, [se.Day(d.date, d.et0 * k) for d in win])
         print(f"  ekish {planting}: {len(win)} kun, potensial ETc = {etc:.0f} mm "
               f"(ETc/ET0 = {etc / ET0_MEASURED:.2f}); o‘lchangan {ETC_MEASURED:.0f} ± {ETC_SD:.0f} mm "
-              f"→ model {100 * (etc / ETC_MEASURED - 1):+.0f}%")
+              f"→ model {100 * (etc / ETC_MEASURED - 1):+.0f}%"
+              + ("" if full else "  ⚠ mavsum to‘liq emas — natija ishonchsiz"))
 
 
 if __name__ == "__main__":

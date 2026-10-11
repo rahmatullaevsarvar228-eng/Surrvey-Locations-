@@ -193,7 +193,7 @@
     "habit_empty": "Fermer odatini kiriting: har necha kunda va bir martada necha mm sug‘oriladi. Qiymatlarni biz o‘ylab topmaymiz.",
     "norm_title": "Me’yor nazorati: mavsumiy suv va gidromodul me’yori",
     "norm_range": "Paxta mavsumiy me’yori",
-    "norm_note": "Yashil oraliq — paxtaning gidromodul rayonlari bo‘yicha mavsumiy me’yorlari, 2 800–6 200 m³/ga (Matyakubov va boshq., 2024), ma’lumotnoma sifatida. Ko‘k belgilar — Suv Maslahatchi: netto (ildizga yetgan suv) va brutto (samaradorlik bilan). Me’yor netto yoki brutto ekanini manbadan tekshiring. Dalaning gidromodul rayoni bu yerda aniqlanmagan; model sizot suvi hissasini hisobga olmaydi va ~25–30% yuqori (Ilmiy asos).",
+    "norm_note": "Yashil oraliq — paxtaning gidromodul rayonlari bo‘yicha mavsumiy me’yorlari, 2 800–6 200 m³/ga (Matyakubov va boshq., 2024), ma’lumotnoma sifatida. Ko‘k belgilar — Suv Maslahatchi: netto (ildizga yetgan suv) va brutto (samaradorlik bilan). Me’yor netto yoki brutto ekanini manbadan tekshiring. Dalaning gidromodul rayoni bu yerda aniqlanmagan; model sizot suvi hissasini hisobga olmaydi va ~22–26% yuqori (Ilmiy asos).",
     "netto": "Netto",
     "brutto": "Brutto"
   },
@@ -247,8 +247,8 @@
     "validation_h": "Dala o‘lchovlari bilan solishtirish (halol natija)",
     "validation": [
       "Kenjabaev va boshq. (2020), Farg‘ona: paxta mavsumida ET0 863 mm, o‘lchangan haqiqiy ETc 560 ± 50 mm (ETc/ET0 = 0,65).",
-      "Bizning model (mahalliy Kc, mavsum ET0 si 863 mm ga normallashtirilgan, mavsum shakli sintetik): potensial ETc 690–730 mm (0,80–0,85; ekish sanasiga bog‘liq). Qayta hisoblash: scripts/validate_kenjabaev.py.",
-      "Xulosa: model taxminan 25–30% yuqori. Sabablari: (1) model stresssiz (potensial) iste’molni hisoblaydi, dala o‘lchovi esa fermer sharoitidagi haqiqiy iste’mol; (2) bosqich davomiyligi mahalliy emas; (3) sizot suvi hissasi hisobga olinmagan (Pereira, 2009).",
+      "Bizning model (mahalliy Kc; mavsum shakli — Farg‘ona va Jizzax 2025 haqiqiy arxivi, Open-Meteo/ERA5; ET0 863 mm ga normallashtirilgan): potensial ETc 681–705 mm (ETc/ET0 = 0,79–0,82; ekish sanasi 10–25 aprel). Qayta hisoblash: scripts/validate_kenjabaev.py fargona_2025.",
+      "Xulosa: model taxminan 22–26% yuqori. Sabablari: (1) model stresssiz (potensial) iste’molni hisoblaydi, dala o‘lchovi esa fermer sharoitidagi haqiqiy iste’mol; (2) bosqich davomiyligi mahalliy emas; (3) sizot suvi hissasi hisobga olinmagan (Pereira, 2009).",
       "Shuning uchun maslahat hozircha ehtiyotkor: ekinni stressga tushirmaydi. Hududiy koeffitsient kc_scale (yadroda tayyor) pilotda Smart Water hisoblagichlari va gidromodul me’yorlari asosida aniqlanadi."
     ],
     "evidence_h": "Telefon orqali maslahat ishlaydimi? (boshqalarning natijalari, bizniki emas)",
