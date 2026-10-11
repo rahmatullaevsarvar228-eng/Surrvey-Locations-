@@ -1,0 +1,55 @@
+name: ITTKI Nazorat — Windows build
+
+on:
+  push:
+    paths:
+      - "ITTKI_Nazorat/**"
+      - ".github/workflows/ittki-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: ITTKI_Nazorat
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Build ITTKI_Nazorat.exe
+        run: pyinstaller --clean --noconfirm ITTKI_Nazorat.spec
+
+      - name: Run the exe without Python in PATH
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "ittki_run"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item dist\ITTKI_Nazorat.exe $dir
+          $env:PATH = "C:\Windows\System32;C:\Windows"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:ITTKI_DATA = $dir
+          if (Get-Command python -ErrorAction SilentlyContinue) { throw "python is still in PATH" }
+          $log = Join-Path $dir "selftest.txt"
+          $p = Start-Process -FilePath (Join-Path $dir "ITTKI_Nazorat.exe") -ArgumentList "--selftest", "`"$log`"" -Wait -PassThru
+          Get-Content $log
+          if ($p.ExitCode -ne 0) { throw "selftest exit code $($p.ExitCode)" }
+          (Get-Item (Join-Path $dir "ITTKI_Nazorat.exe")).Length / 1MB
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ITTKI_Nazorat-windows
+          path: ITTKI_Nazorat/dist/ITTKI_Nazorat.exe

@@ -31,8 +31,9 @@ def make_app(argv=None):
     return app
 
 
-def selftest() -> int:
-    """`ITTKI_Nazorat.exe --selftest`: engine scenarios + DB + offscreen GUI start, exit code 0 = OK."""
+def selftest(log: str | None = None) -> int:
+    """`ITTKI_Nazorat.exe --selftest [log.txt]`: demo data + engine + DB + offscreen GUI start.
+    Exit code 0 = OK. A windowed exe has no console, so the result can also be written to a file."""
     import tempfile
     from datetime import date
 
@@ -59,16 +60,19 @@ def selftest() -> int:
         app.processEvents()
         card.close(); w.close()
         repo.close()
-    print("ITTKI Nazorat selftest OK")
-    for k, (a, b) in caps.items():
-        print(f"  {k}: IAS 38 {a:,} | BHMS 11 {b:,}")
+    lines = ["ITTKI Nazorat selftest OK", f"  python {sys.version.split()[0]}, frozen={getattr(sys, 'frozen', False)}"]
+    lines += [f"  {k}: IAS 38 {a:,} | BHMS 11 {b:,}" for k, (a, b) in caps.items()]
+    print("\n".join(lines))
+    if log:
+        Path(log).write_text("\n".join(lines) + "\n", encoding="utf-8")
     return 0
 
 
 def main(argv=None) -> int:
     argv = list(sys.argv if argv is None else argv)
     if "--selftest" in argv:
-        return selftest()
+        i = argv.index("--selftest")
+        return selftest(argv[i + 1] if i + 1 < len(argv) else None)
     from ..db.repository import Repository
     from ..services import Service
     from .dialogs import LoginDialog
