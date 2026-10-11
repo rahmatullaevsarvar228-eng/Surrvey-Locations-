@@ -230,6 +230,7 @@ class SimRow(TypedDict):
     netto_mm: float           # ildiz zonasiga yetgan suv
     chuqur_mm: float          # ildizdan pastga o‘tgan suv (yo‘qotish)
     tanqislik_mm: float       # kun oxiridagi Dr
+    zaxira: float             # 1 − Dr/TAW (0..1)
     taw_mm: float
     raw_mm: float
     zr_m: float
@@ -288,6 +289,7 @@ def simulate(fld: Field, days: list[Day], start_depletion: float = 0.0,
                            et0=round(d.et0, 2), etc=round(etc, 2), yomgir=round(d.rain, 1),
                            sugorish_mm=round(gross, 1), netto_mm=round(net, 1),
                            chuqur_mm=round(deep, 1), tanqislik_mm=round(dr, 1),
+                           zaxira=round(1 - dr / taw, 3),
                            taw_mm=round(taw, 1), raw_mm=round(raw, 1),
                            zr_m=round(root_depth(fld, das), 2), stress=is_stress))
     return SimResult(rows=rows, suv_m3_ga=round(gross_t * MM_TO_M3_HA),
@@ -369,6 +371,16 @@ def advice(fld: Field, last_irrigation: date, history: list[Day], forecast: list
             out["bolib_kun"] = math.ceil(d / mx) if (k == 0 and mx and d > mx * 1.2) else None
             break
     return out
+
+
+def week_plan(fld: Field, last_irrigation: date, history: list[Day], forecast: list[Day]) -> SimResult:
+    """/hafta: prognoz kunlari bo‘yicha FAO-56 sug‘orish rejasi (bugungi tanqislikdan boshlab)."""
+    return simulate(fld, forecast, start_depletion=depletion_since(fld, last_irrigation, history))
+
+
+def potential_etc(fld: Field, days: list[Day]) -> float:
+    """Mavsum davomidagi stresssiz (potensial) ETc yig‘indisi, mm — dala o‘lchovi bilan solishtirish uchun."""
+    return sum(etc_of(fld, d) for d in days)
 
 
 def bar(fraction: float, width: int = 10) -> str:

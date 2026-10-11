@@ -33,6 +33,7 @@ body {
 }
 .num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 .kpi { font-size: var(--fs-kpi); line-height: 1.05; }
+.kpi-sm { font-size: calc(var(--fs-kpi) * 0.7); line-height: 1.1; }
 
 :focus-visible { outline: 3px solid rgb(var(--water)); outline-offset: 2px; border-radius: 6px; }
 

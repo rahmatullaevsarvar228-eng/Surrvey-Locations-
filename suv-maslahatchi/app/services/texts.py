@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from engine.suv_engine import Advice, bar
+from engine.suv_engine import Advice, SimResult, bar
 
 I18N_DIR = Path(__file__).resolve().parents[2] / "i18n"
 LANGS = ("uz", "ru")
@@ -73,3 +74,26 @@ def why_text(a: Advice, crop: str, lang: str = "uz") -> str:
              dr=f"{a['tanqislik_mm']:.0f}", bar=bar(z), zaxira=_pct(z),
              stage=t(lang, f"stage.{a['bosqich']}"))
     return f"{body}\n{t(lang, 'advice.why_model')}"
+
+
+def week_text(plan: SimResult, crop: str, area_ha: float, lang: str = "uz") -> str:
+    """/hafta: har kun — sug‘orish (m³/ga) yoki kutish (zaxira foizi)."""
+    wd: list[str] = load(lang)["bot"]["weekdays"]
+    lines = [t(lang, "bot.week_title", crop=t(lang, f"crop.{crop}"), area=_num(area_ha))]
+    total = 0.0
+    n = 0
+    for r in plan["rows"]:
+        d = date.fromisoformat(r["sana"])
+        day = f"{d:%d.%m} {wd[d.weekday()]}"
+        if r["etc"] == 0:
+            lines.append(t(lang, "bot.week_off", day=day))
+        elif r["sugorish_mm"] > 0:
+            m3 = round(r["sugorish_mm"] * 10)
+            total += m3 * area_ha
+            n += 1
+            lines.append(t(lang, "bot.week_irrigate", day=day, m3=m3))
+        else:
+            lines.append(t(lang, "bot.week_wait", day=day, zaxira=_pct(r["zaxira"])))
+    if n:
+        lines.append(t(lang, "bot.week_total", m3=round(total), n=n))
+    return "\n".join(lines)

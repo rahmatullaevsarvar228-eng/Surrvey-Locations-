@@ -71,10 +71,14 @@ export function BucketPage({ cache }: { cache: CacheMeta }) {
           </div>
         </div>
 
-        <div className={`grid gap-4 ${hRow ? "sm:grid-cols-2" : ""} justify-items-center`}>
+        {/* TZ 5.2-A: chapda «Odat», o‘ngda «Suv Maslahatchi» */}
+        <div className="grid gap-4 sm:grid-cols-2 justify-items-center items-start">
+          {hRow
+            ? <SoilBucket row={hRow} zrMax={zrMax} title={t("web.mode_habit")} tone="soil" />
+            : <HabitPlaceholder value={habit} onChange={setHabit} />}
           <SoilBucket row={row} zrMax={zrMax} title={t("web.mode_fao")} />
-          {hRow && <SoilBucket row={hRow} zrMax={zrMax} title={t("web.mode_habit")} tone="soil" />}
         </div>
+        <CompareKpis fao={data.fao} habit={data.habit} upto={day} />
 
         <div className="card flex flex-wrap items-center gap-3">
           <button className="btn btn-primary min-w-[8rem] justify-center" onClick={() => {
@@ -104,11 +108,9 @@ export function BucketPage({ cache }: { cache: CacheMeta }) {
 
       <aside className="space-y-4">
         <DayAdvice rows={rows} day={day} />
-        <Totals res={data.fao} upto={day} title={t("web.mode_fao")} />
-        {data.habit && <Totals res={data.habit} upto={day} title={t("web.mode_habit")} />}
         <div className="card space-y-3">
           <FieldControls value={field} onChange={setField} />
-          <HabitInputs value={habit} onChange={setHabit} />
+          {hRow && <HabitInputs value={habit} onChange={setHabit} />}
         </div>
         <Legend />
       </aside>
@@ -142,25 +144,54 @@ function DayAdvice({ rows, day }: { rows: SimRow[]; day: number }) {
   );
 }
 
-function Totals({ res, upto, title }: { res: SimResult; upto: number; title: string }) {
+function cumulative(res: SimResult, upto: number) {
+  const part = res.rows.slice(0, upto + 1);
+  const gross = part.reduce((a, r) => a + r.sugorish_mm, 0);
+  const net = part.reduce((a, r) => a + r.netto_mm, 0);
+  const deep = part.reduce((a, r) => a + r.chuqur_mm, 0);
+  return { water: gross * 10, loss: (gross - net + deep) * 10, stress: part.filter((r) => r.stress).length };
+}
+
+/** TZ 5.2-A: pastda 3 ta katta raqam — sarflangan suv, yo‘qotish, stress kunlari; ikkala usul. */
+function CompareKpis({ fao, habit, upto }: { fao: SimResult; habit: SimResult | null; upto: number }) {
   const { t } = useT();
-  const s = useMemo(() => {
-    const part = res.rows.slice(0, upto + 1);
-    const gross = part.reduce((a, r) => a + r.sugorish_mm, 0);
-    const net = part.reduce((a, r) => a + r.netto_mm, 0);
-    const deep = part.reduce((a, r) => a + r.chuqur_mm, 0);
-    return { water: gross * 10, loss: (gross - net + deep) * 10, deep: deep * 10,
-             stress: part.filter((r) => r.stress).length, events: part.filter((r) => r.sugorish_mm > 0).length };
-  }, [res, upto]);
+  const a = useMemo(() => cumulative(fao, upto), [fao, upto]);
+  const b = useMemo(() => (habit ? cumulative(habit, upto) : null), [habit, upto]);
+  const cols: { label: string; unit: string; key: "water" | "loss" | "stress"; bad?: boolean }[] = [
+    { label: t("web.kpi_water"), unit: t("web.unit_m3ha"), key: "water" },
+    { label: t("web.kpi_loss"), unit: t("web.unit_m3ha"), key: "loss", bad: true },
+    { label: t("web.kpi_stress"), unit: t("web.unit_days"), key: "stress", bad: true },
+  ];
   return (
-    <div className="card">
-      <div className="text-sm text-muted mb-1">{title}</div>
-      <dl className="grid grid-cols-2 gap-2">
-        <Kpi label={t("web.kpi_water")} value={fmt(s.water)} unit={t("web.unit_m3ha")} tone="water" />
-        <Kpi label={t("web.kpi_loss")} value={fmt(s.loss)} unit={t("web.unit_m3ha")} tone={s.loss > 0 ? "alert" : "ink"} />
-        <Kpi label={t("web.kpi_events")} value={String(s.events)} />
-        <Kpi label={t("web.kpi_stress")} value={String(s.stress)} unit={t("web.unit_days")} tone={s.stress ? "alert" : "ink"} />
-      </dl>
+    <div className="grid gap-4 sm:grid-cols-3" aria-live="polite">
+      {cols.map((c) => (
+        <div key={c.key} className="card">
+          <div className="text-sm text-muted mb-1">{c.label}, {c.unit}</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <div className="text-sm text-soil font-medium">{t("web.mode_habit")}</div>
+              <div className={`num kpi-sm font-semibold whitespace-nowrap ${b && c.bad && b[c.key] > 0 ? "text-alert" : ""}`}>
+                {b ? fmt(b[c.key]) : "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-water font-medium">{t("web.mode_fao")}</div>
+              <div className={`num kpi-sm font-semibold whitespace-nowrap ${c.bad && a[c.key] > 0 ? "text-alert" : "text-water"}`}>{fmt(a[c.key])}</div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HabitPlaceholder({ value, onChange }: { value: HabitState; onChange: (v: HabitState) => void }) {
+  const { t } = useT();
+  return (
+    <div className="card border-t-8 border-t-soil w-full max-w-[320px] self-stretch flex flex-col justify-center">
+      <div className="font-semibold mb-1">{t("web.mode_habit")}</div>
+      <p className="text-sm text-muted mb-2">{t("web.habit_empty")}</p>
+      <HabitInputs value={value} onChange={onChange} />
     </div>
   );
 }

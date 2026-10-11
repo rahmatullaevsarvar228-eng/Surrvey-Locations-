@@ -15,6 +15,7 @@ class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)        # Telegram user id
     lang: Mapped[str] = mapped_column(String(2), default="uz")
+    active_field_id: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     fields: Mapped[list[FieldRow]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
@@ -31,6 +32,7 @@ class FieldRow(Base):
     lat: Mapped[float] = mapped_column(Float)
     lon: Mapped[float] = mapped_column(Float)
     eff: Mapped[float | None] = mapped_column(Float, nullable=True)
+    place: Mapped[str | None] = mapped_column(String(64), nullable=True)   # viloyat nomi yoki None (GPS)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     user: Mapped[User] = relationship(back_populates="fields")
     events: Mapped[list[IrrigationEvent]] = relationship(back_populates="field",

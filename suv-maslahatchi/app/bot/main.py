@@ -15,8 +15,9 @@ from app.services.weather import WeatherClient
 from .handlers import build_router
 from .scheduler import make_scheduler
 
-COMMANDS = [("maslahat", "Bugungi maslahat"), ("sugordim", "Bugun sug‘ordim"), ("dala", "Dala ma’lumotlari"),
-            ("demo", "Demo (arxiv ob-havo)"), ("til", "Til / Язык"), ("start", "Yangi dala")]
+COMMANDS = [("bugun", "Bugungi maslahat"), ("hafta", "7 kunlik reja"), ("sugordim", "Bugun sug‘ordim"),
+            ("dala", "Dalalar"), ("demo", "Demo (2026-yil iyul arxivi)"), ("til", "Til / Язык"),
+            ("yordam", "Yordam"), ("start", "Yangi dala qo‘shish")]
 
 
 async def run() -> None:

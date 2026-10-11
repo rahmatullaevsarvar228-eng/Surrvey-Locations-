@@ -30,13 +30,20 @@ app/core/config.py        sozlamalar (.env)
 app/services/             weather (Open-Meteo: 0,1° setka, 3 soat TTL, qayta urinish, fayl zaxirasi),
                           demo_cache (oflayn kesh), advisor, texts (i18n), demo_fields (namuna, sintetik)
 app/db/                   SQLAlchemy 2 + SQLite: users, fields, irrigation_events
-app/bot/                  aiogram 3: onboarding FSM, /maslahat /sugordim /dala /demo /til /stats, 07:00 rejalashtiruvchi
+app/bot/                  aiogram 3: tugmali onboarding (lokatsiya/viloyat, kalendar), /bugun /hafta /sugordim /dala
+                          (bir nechta dala) /demo /til /yordam /stats, 07:00 da har bir dalaga xabar
 app/api/                  FastAPI: /api/advice /api/simulate /api/demand /api/demo + yig‘ilgan veb
 web/                      Vite + React + TS + Tailwind + ECharts (shriftlar @fontsource, CDN yo‘q)
 i18n/uz.json, ru.json     foydalanuvchiga ko‘rinadigan barcha matnlar
-scripts/                  build_demo_cache.py, make_synthetic_fixture.py, seed_demo_fields.py, make_qr.py
+scripts/                  build_demo_cache.py (asosiy: Jizzax 2026), validate_kenjabaev.py (TZ §6 qayta hisobi),
+                          make_synthetic_fixture.py, seed_demo_fields.py, make_qr.py
 tests/                    pytest: engine, servislar, API, bot oqimi (tarmoqsiz)
 ```
+
+## Validatsiya (TZ §6)
+
+`python scripts/validate_kenjabaev.py [cache_id]` — mavsum ET0 863 mm ga normallashtirilganda potensial ETc 690–730 mm;
+Kenjabaev (2020) o‘lchagan 560 ± 50 mm dan ~25–30% yuqori. Test: `tests/test_engine.py::test_validation_ratio_reproduces_tz6`.
 
 ## Halollik qoidalari
 

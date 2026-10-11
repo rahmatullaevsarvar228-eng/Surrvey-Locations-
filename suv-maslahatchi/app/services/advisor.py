@@ -39,6 +39,16 @@ def advise_live(fld: Field, last_irrigation: date, client: WeatherClient,
     return render(fld, se.advice(fld, last_irrigation, w.history, w.forecast), lang), w
 
 
+def week_live(fld: Field, last_irrigation: date, client: WeatherClient) -> tuple[se.SimResult, Weather]:
+    w = client.get(fld.lat, fld.lon, past_days=past_days_needed(last_irrigation, client.today()))
+    return se.week_plan(fld, last_irrigation, w.history, w.forecast), w
+
+
+def week_demo(fld: Field, last_irrigation: date, cache: DemoCache, today: date) -> se.SimResult:
+    hist, fc = cache.history_forecast(today)
+    return se.week_plan(fld, last_irrigation, hist, fc)
+
+
 def advise_demo(fld: Field, last_irrigation: date, cache: DemoCache, today: date,
                 lang: str = "uz") -> AdviceOut:
     hist, fc = cache.history_forecast(today)

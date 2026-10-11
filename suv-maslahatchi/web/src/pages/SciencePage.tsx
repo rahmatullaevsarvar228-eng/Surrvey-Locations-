@@ -1,13 +1,24 @@
 import { useState } from "react";
 import { useT } from "../lib/i18n";
 
-const SECTIONS: { h: string; items: string; tone: string; ordered?: boolean }[] = [
+const SECTIONS: { h: string; items: string; tone: string; ordered?: boolean; links?: boolean }[] = [
   { h: "science.model_h", items: "science.model_p", tone: "border-water" },
   { h: "science.params_h", items: "science.params", tone: "border-soil" },
+  { h: "science.validation_h", items: "science.validation", tone: "border-sun" },
   { h: "science.gap_h", items: "science.gap", tone: "border-alert" },
+  { h: "science.evidence_h", items: "science.evidence", tone: "border-leaf" },
   { h: "science.plan_h", items: "science.plan", tone: "border-leaf", ordered: true },
-  { h: "science.refs_h", items: "science.refs", tone: "border-muted" },
+  { h: "science.authors_h", items: "science.authors", tone: "border-water" },
+  { h: "science.refs_h", items: "science.refs", tone: "border-muted", links: true },
 ];
+
+/** "Matn — https://…" → havola (sahna noutbukida internet bo‘lmasa ham matn o‘qiladi). */
+function Ref({ text }: { text: string }) {
+  const i = text.lastIndexOf(" — http");
+  if (i < 0) return <>{text}</>;
+  const url = text.slice(i + 3);
+  return <>{text.slice(0, i)} — <a className="text-water underline break-all" href={url} target="_blank" rel="noreferrer">{url}</a></>;
+}
 
 export function SciencePage() {
   const { t, list } = useT();
@@ -27,7 +38,7 @@ export function SciencePage() {
           <section key={s.h} className={`card border-l-8 ${s.tone}`}>
             <h2 className="text-xl font-semibold mb-2">{t(s.h)}</h2>
             <L className={`${s.ordered ? "list-decimal" : "list-disc"} pl-5 space-y-1.5 leading-relaxed`}>
-              {list(s.items).map((x) => <li key={x}>{x}</li>)}
+              {list(s.items).map((x) => <li key={x}>{s.links ? <Ref text={x} /> : x}</li>)}
             </L>
           </section>
         );

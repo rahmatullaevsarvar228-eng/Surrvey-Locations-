@@ -66,6 +66,8 @@ export function SimulatorPage({ cache }: { cache: CacheMeta }) {
               {data.habit && <ResultCard title={t("web.mode_habit")} r={data.habit} tone="soil" />}
               {data.habit && <DiffCard a={data.fao} b={data.habit} perM3={hasCost ? perM3 : null} />}
             </div>
+            <NormCard fao={data.fao} habit={data.habit} crop={data.meta.crop} />
+            <div className="card"><Daily data={data} /></div>
             <div className="card"><Cumulative data={data} /></div>
           </>
         )}
@@ -135,4 +137,66 @@ function Cumulative({ data }: { data: SimulateOut }) {
     };
   }, [data, lang]); // eslint-disable-line react-hooks/exhaustive-deps
   return <EChart option={option} height={320} label={t("web.kpi_water")} />;
+}
+
+/** TZ 5.2-B: me’yor nazorati — paxta mavsumiy me’yori gidromodul rayonlari bo‘yicha 2 800–6 200 m³/ga
+ *  (Matyakubov va boshq., 2024). Faqat ma’lumotnoma: rayon aniqlanmagan, solishtirish taxminiy. */
+const NORM = { paxta: [2800, 6200] as const };
+
+function NormCard({ fao, habit, crop }: { fao: SimResult; habit: SimResult | null; crop: string }) {
+  const { t } = useT();
+  if (crop !== "paxta") return null;
+  const [lo, hi] = NORM.paxta;
+  const net = Math.round(fao.rows.reduce((a, r) => a + r.netto_mm, 0) * 10);
+  const max = Math.max(hi * 1.25, fao.suv_m3_ga, habit?.suv_m3_ga ?? 0) * 1.05;
+  const pos = (v: number) => `${Math.min(100, (v / max) * 100)}%`;
+  return (
+    <div className="card">
+      <div className="font-semibold">{t("web.norm_title")}</div>
+      <div className="relative h-12 mt-6 mb-8" role="img"
+           aria-label={`${t("web.norm_range")}: ${fmt(lo)}–${fmt(hi)} m³/ga; ${t("web.mode_fao")}: ${fmt(fao.suv_m3_ga)}`}>
+        <div className="absolute inset-x-0 top-5 h-2 rounded bg-ink/10" />
+        <div className="absolute top-3 h-6 rounded bg-leaf/30 border border-leaf" style={{ left: pos(lo), width: `calc(${pos(hi)} - ${pos(lo)})` }} />
+        <span className="absolute top-10 text-xs text-muted num -translate-x-1/2" style={{ left: pos(lo) }}>{fmt(lo)}</span>
+        <span className="absolute top-10 text-xs text-muted num -translate-x-1/2" style={{ left: pos(hi) }}>{fmt(hi)}</span>
+        <Marker x={pos(net)} cls="bg-water" label={`${t("web.netto")} ${fmt(net)}`} top />
+        <Marker x={pos(fao.suv_m3_ga)} cls="bg-water" label={`${t("web.brutto")} ${fmt(fao.suv_m3_ga)}`} />
+        {habit && <Marker x={pos(habit.suv_m3_ga)} cls="bg-soil" label={`${t("web.mode_habit")} ${fmt(habit.suv_m3_ga)}`} />}
+      </div>
+      <p className="text-sm text-muted">{t("web.norm_note")}</p>
+    </div>
+  );
+}
+
+function Marker({ x, cls, label, top = false }: { x: string; cls: string; label: string; top?: boolean }) {
+  return (
+    <div className="absolute -translate-x-1/2" style={{ left: x, top: top ? -14 : 30 }}>
+      <div className={`text-xs font-semibold whitespace-nowrap num ${top ? "" : "mt-3"}`}>{label}</div>
+      <div className={`w-1 h-6 mx-auto rounded ${cls}`} style={{ marginTop: top ? 0 : -40 }} />
+    </div>
+  );
+}
+
+function Daily({ data }: { data: SimulateOut }) {
+  const { t, lang } = useT();
+  const option = useMemo(() => {
+    const rows = data.fao.rows;
+    return {
+      textStyle: { fontFamily: "IBM Plex Sans", color: tok("muted") },
+      tooltip: { trigger: "axis" },
+      legend: { type: "scroll", top: 0, textStyle: { color: tok("ink") } },
+      grid: { left: 44, right: 44, top: 40, bottom: 28 },
+      xAxis: { type: "category", data: rows.map((r) => r.sana.slice(5)), axisLabel: { interval: 29 } },
+      yAxis: [{ type: "value", name: "mm/kun", splitLine: { lineStyle: { color: tok("muted", 0.2) } } },
+              { type: "value", name: "mm", splitLine: { show: false } }],
+      series: [
+        { name: "ET0", type: "line", symbol: "none", data: rows.map((r) => r.et0), lineStyle: { color: tok("sun"), width: 1.5 }, itemStyle: { color: tok("sun") } },
+        { name: "ETc", type: "line", symbol: "none", data: rows.map((r) => r.etc), lineStyle: { color: tok("leaf"), width: 2 }, itemStyle: { color: tok("leaf") } },
+        { name: t("web.reserve"), type: "line", yAxisIndex: 1, symbol: "none", data: rows.map((r) => +(r.taw_mm - r.tanqislik_mm).toFixed(1)),
+          lineStyle: { color: tok("water"), width: 1.5 }, itemStyle: { color: tok("water") }, areaStyle: { color: tok("water", 0.12) } },
+        { name: t("web.irrigation"), type: "bar", yAxisIndex: 1, data: rows.map((r) => r.netto_mm), itemStyle: { color: tok("water", 0.7) }, barMaxWidth: 6 },
+      ],
+    };
+  }, [data, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <EChart option={option} height={300} label="ET0, ETc" />;
 }

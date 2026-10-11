@@ -21,6 +21,8 @@ OUT = Path(__file__).resolve().parents[1] / "data" / "cache"
 
 # id, joy, lat, lon, boshlanish, tugash, ekin, namuna ekish sanasi
 SCENARIOS: list[tuple[str, str, float, float, str, str, str, str]] = [
+    # TZ: asosiy sahna — 2026-yil Jizzax mavsumi (iyul — /demo). Arxiv ~5 kun kechikadi.
+    ("jizzax_2026", "Jizzax", 40.12, 67.84, "2026-03-15", "2026-10-05", "paxta", "2026-04-15"),
     ("jizzax_2025", "Jizzax", 40.12, 67.84, "2025-03-01", "2025-10-31", "paxta", "2025-04-15"),
     ("fargona_2025", "Farg‘ona", 40.39, 71.78, "2025-03-01", "2025-10-31", "paxta", "2025-04-15"),
     ("qarshi_2025", "Qarshi", 38.86, 65.79, "2025-03-01", "2025-10-31", "paxta", "2025-04-10"),

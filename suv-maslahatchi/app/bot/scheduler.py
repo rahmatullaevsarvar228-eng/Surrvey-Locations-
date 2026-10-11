@@ -1,4 +1,4 @@
-"""Har kuni soat 07:00 (Asia/Tashkent) barcha dalalar uchun maslahat yuborish."""
+"""Har kuni soat 07:00 (Asia/Tashkent) har bir dala uchun maslahat yuborish (TZ 3.4: qaror paytida turtki)."""
 from __future__ import annotations
 
 import asyncio
@@ -20,14 +20,19 @@ log = logging.getLogger(__name__)
 
 async def send_daily(bot: Bot, repo: Repo, wc: WeatherClient) -> int:
     sent = 0
-    for row in repo.latest_field_per_user():
+    rows = repo.all_fields()
+    per_user: dict[int, int] = {}
+    for row in rows:
+        per_user[row.user_id] = per_user.get(row.user_id, 0) + 1
+    for row in rows:
         try:
-            rep = await asyncio.to_thread(service.advice_for_user, repo, wc, row.user_id)
-            await bot.send_message(row.user_id, rep.text,
-                                   reply_markup=kb.advice_kb(repo.lang(row.user_id), rep.field_id))
+            lang = repo.lang(row.user_id)
+            rep = await asyncio.to_thread(service.advice_for_field, repo, wc, row, lang, per_user[row.user_id] > 1)
+            markup = kb.advice_kb(lang, rep.field_id) if rep.why else None
+            await bot.send_message(row.user_id, rep.text, reply_markup=markup)
             sent += 1
         except Exception:   # bitta foydalanuvchi xatosi qolganlarni to‘xtatmasin
-            log.exception("kundalik xabar yuborilmadi: user=%s", row.user_id)
+            log.exception("kundalik xabar yuborilmadi: user=%s field=%s", row.user_id, row.id)
         await asyncio.sleep(0.05)   # Telegram limitlari
     log.info("kundalik maslahat: %s ta yuborildi", sent)
     return sent

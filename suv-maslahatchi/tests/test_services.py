@@ -195,10 +195,14 @@ def test_repo_roundtrip(settings: Settings) -> None:
     assert r.last_irrigation(fid) == date(2025, 7, 1)
     r.add_irrigation(fid, date(2025, 7, 9), 400)
     assert r.last_irrigation(fid) == date(2025, 7, 9)
-    fid2 = r.add_field(77, f, None)
+    fid2 = r.add_field(77, f, None, place="jizzax")
     assert r.last_irrigation(fid2) is None
-    assert [x.id for x in r.latest_field_per_user()] == [fid2]
-    assert len(r.all_fields()) == 2 and r.stats() == (2, 2, 2)
+    assert r.current_field(77).id == fid2  # type: ignore[union-attr]
+    assert r.set_active(77, fid) and r.current_field(77).id == fid  # type: ignore[union-attr]
+    other = r.add_field(78, f, None)
+    assert not r.set_active(77, other) and not r.set_active(77, 999) and not r.set_active(5, fid)
+    assert [x.id for x in r.fields_of(77)] == [fid, fid2] and r.fields_of(77)[1].place == "jizzax"
+    assert len(r.all_fields()) == 3 and r.stats() == (2, 3, 2)
     assert r.current_field(5) is None
     Repo("sqlite:///:memory:")
 

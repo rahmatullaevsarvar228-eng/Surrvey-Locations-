@@ -49,32 +49,49 @@ class Repo:
             return u.lang if u else "uz"
 
     # ---------------------------------------------------------------- fields
-    def add_field(self, uid: int, fld: Field, last_irrigation: date | None) -> int:
+    def add_field(self, uid: int, fld: Field, last_irrigation: date | None, place: str | None = None) -> int:
+        """Yangi dala qo‘shadi va uni faol qiladi."""
         self.ensure_user(uid)
         with self.session() as s:
             row = FieldRow(user_id=uid, crop=fld.crop, soil=fld.soil, method=fld.method,
                            planting=fld.planting, area_ha=fld.area_ha, lat=fld.lat, lon=fld.lon,
-                           eff=fld.eff)
+                           eff=fld.eff, place=place)
             s.add(row)
             s.flush()
             if last_irrigation:
                 s.add(IrrigationEvent(field_id=row.id, date=last_irrigation))
+            u = s.get(User, uid)
+            assert u is not None
+            u.active_field_id = row.id
             return row.id
 
-    def current_field(self, uid: int) -> FieldRow | None:
-        """Foydalanuvchining eng so‘nggi dalasi (MVP: bitta faol dala)."""
+    def fields_of(self, uid: int) -> list[FieldRow]:
         with self.session() as s:
+            return list(s.scalars(select(FieldRow).where(FieldRow.user_id == uid).order_by(FieldRow.id)))
+
+    def set_active(self, uid: int, field_id: int) -> bool:
+        with self.session() as s:
+            row = s.get(FieldRow, field_id)
+            u = s.get(User, uid)
+            if row is None or u is None or row.user_id != uid:
+                return False
+            u.active_field_id = field_id
+            return True
+
+    def current_field(self, uid: int) -> FieldRow | None:
+        """Faol dala; belgilanmagan bo‘lsa — eng so‘nggisi."""
+        with self.session() as s:
+            u = s.get(User, uid)
+            if u is not None and u.active_field_id is not None:
+                row = s.get(FieldRow, u.active_field_id)
+                if row is not None and row.user_id == uid:
+                    return row
             return s.scalars(select(FieldRow).where(FieldRow.user_id == uid)
                              .order_by(FieldRow.id.desc()).limit(1)).first()
 
     def all_fields(self) -> list[FieldRow]:
         with self.session() as s:
             return list(s.scalars(select(FieldRow)))
-
-    def latest_field_per_user(self) -> list[FieldRow]:
-        with self.session() as s:
-            sub = select(func.max(FieldRow.id)).group_by(FieldRow.user_id)
-            return list(s.scalars(select(FieldRow).where(FieldRow.id.in_(sub))))
 
     # ---------------------------------------------------------------- irrigation
     def add_irrigation(self, field_id: int, day: date, m3: float | None = None) -> None:

@@ -282,3 +282,31 @@ def test_get_reads_json(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(se.urllib.request, "urlopen",
                         lambda url, timeout: R(json.dumps(SAMPLE).encode()))
     assert se._get("https://x")["daily"]["time"][0] == "2025-06-01"
+
+
+# ---------------------------------------------------------------- haftalik reja va validatsiya
+def test_week_plan_matches_advice() -> None:
+    today = PLANT + timedelta(days=100)
+    hist = days(today - timedelta(days=30), 30, et0=7.0)
+    fc = days(today, 7, et0=7.0)
+    f = fld()
+    plan = se.week_plan(f, today - timedelta(days=10), hist, fc)
+    a = se.advice(f, today - timedelta(days=10), hist, fc)
+    first = next(i for i, r in enumerate(plan["rows"]) if r["sugorish_mm"] > 0)
+    assert first == a["kun"]
+    assert plan["rows"][first]["sugorish_mm"] * 10 == pytest.approx(a["m3_ga"], abs=6)
+
+
+def test_validation_ratio_reproduces_tz6() -> None:
+    """TZ §6: ET0 = 863 mm ga normallashtirilgan mavsum → mahalliy Kc bilan potensial ETc ≈ 690–730 mm (0,80–0,85).
+    Kenjabaev (2020) o‘lchagan haqiqiy ETc 560 ± 50 mm — model ~25–30% yuqori (stresssiz, sizot suvisiz)."""
+    fix = json.loads((__import__("pathlib").Path(__file__).parent / "fixtures" / "sintetik_2025.json")
+                     .read_text(encoding="utf-8"))
+    all_days = se.parse_open_meteo(fix)
+    f = fld()
+    win = [d for d in all_days if PLANT <= d.date < PLANT + timedelta(days=se.season_length("paxta"))]
+    k = 863 / sum(d.et0 for d in win)
+    etc = se.potential_etc(f, [Day(d.date, d.et0 * k) for d in win])
+    assert 690 <= etc <= 730
+    assert 0.80 <= etc / 863 <= 0.85
+    assert 1.2 <= etc / 560 <= 1.35

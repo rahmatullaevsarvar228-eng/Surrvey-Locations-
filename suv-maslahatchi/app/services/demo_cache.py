@@ -72,6 +72,7 @@ def list_caches(cache_dir: Path, allow_synthetic: bool = False) -> list[DemoCach
     files = sorted(cache_dir.glob("*.json")) if cache_dir.exists() else []
     out = [_read(p) for p in files]
     out = [c for c in out if not c.meta.synthetic]      # data/cache ga faqat haqiqiy ma’lumot
+    out.sort(key=lambda c: (-c.meta.start.year, c.meta.crop != "paxta", c.meta.place != "Jizzax", c.meta.id))
     if allow_synthetic and FIXTURES.exists():
         out += [_read(p) for p in sorted(FIXTURES.glob("sintetik_*.json"))]
     return out

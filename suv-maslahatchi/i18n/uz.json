@@ -58,22 +58,62 @@
     "ask_crop": "Qaysi ekin?",
     "ask_soil": "Tuprog‘ingiz qanday? Bir hovuch nam tuproqni qo‘lda siqib ko‘ring:",
     "ask_method": "Qanday sug‘orasiz?",
-    "ask_planting": "Ekilgan sana? (masalan: 15.04.2026)",
-    "ask_area": "Maydon necha gektar? (masalan: 2.5)",
-    "ask_location": "Dala joylashuvini yuboring (📎 → Joylashuv) yoki «Jizzax» tugmasini bosing.",
+    "ask_planting": "📅 Ekilgan sanani tanlang:",
+    "ask_area": "📐 Maydon necha gektar?",
+    "ask_location": "📍 Dala qayerda? Joylashuvni yuboring yoki viloyatni tanlang.",
     "default_location": "📍 Jizzax (standart)",
     "send_location": "📍 Joylashuvni yuborish",
-    "ask_last_irrigation": "Oxirgi marta qachon sug‘ordingiz? (masalan: 05.07.2026, yoki «bugun»)",
+    "ask_last_irrigation": "💧 Oxirgi marta qachon sug‘ordingiz? Sanani tanlang:",
     "today_word": "bugun",
     "saved": "✅ Dala saqlandi. Har kuni soat {hour}:00 da maslahat yuboraman.",
-    "irrigated_btn": "💧 Bugun sug‘ordim",
+    "irrigated_btn": "✅ Sug‘ordim",
     "why_btn": "❓ Nega?",
     "irrigated_ok": "Yozib qo‘ydim: {date} sug‘orildi. Tuproq to‘la deb hisoblayman.",
-    "menu": "Buyruqlar:\n/maslahat — bugungi maslahat\n/sugordim — bugun sug‘ordim\n/dala — dala ma’lumotlari\n/demo — demo (arxiv ob-havo)\n/til — tilni almashtirish\n/start — yangi dala",
+    "menu": "Buyruqlar:\n/bugun — bugungi maslahat\n/hafta — 7 kunlik reja\n/sugordim — bugun sug‘ordim\n/dala — dalalar (bir nechta bo‘lishi mumkin)\n/demo — demo (2026-yil iyul arxivi)\n/til — tilni almashtirish\n/yordam — yordam\n/start — yangi dala qo‘shish",
     "field_info": "🌱 {crop} · {soil} · {method}\nEkilgan: {planting} · {area} ga\nJoy: {lat}, {lon}\nOxirgi sug‘orish: {last}",
     "lang_set": "Til: o‘zbekcha ✅",
     "demo_pick": "Demo uchun joy va sanani tanlang (arxivdagi haqiqiy ob-havo):",
-    "admin_stats": "Foydalanuvchilar: {users}, dalalar: {fields}, sug‘orish yozuvlari: {events}"
+    "admin_stats": "Foydalanuvchilar: {users}, dalalar: {fields}, sug‘orish yozuvlari: {events}",
+    "pick_region_btn": "🗺 Viloyatni tanlash",
+    "pick_region": "Viloyatni tanlang (ob-havo viloyat markazi bo‘yicha olinadi):",
+    "area_other": "Boshqa",
+    "ask_area_other": "Maydonni gektarda yozing (masalan: 2.5):",
+    "months": [
+      "Yanvar",
+      "Fevral",
+      "Mart",
+      "Aprel",
+      "May",
+      "Iyun",
+      "Iyul",
+      "Avgust",
+      "Sentabr",
+      "Oktabr",
+      "Noyabr",
+      "Dekabr"
+    ],
+    "weekdays": [
+      "Du",
+      "Se",
+      "Ch",
+      "Pa",
+      "Ju",
+      "Sh",
+      "Ya"
+    ],
+    "picked": "✔ {value}",
+    "week_btn": "📅 7 kunlik reja",
+    "week_title": "📅 7 kunlik reja · {crop} · {area} ga",
+    "week_irrigate": "{day} — 💧 sug‘oring ≈ {m3} m³/ga",
+    "week_wait": "{day} — kuting · zaxira {zaxira}",
+    "week_off": "{day} — mavsumdan tashqari",
+    "week_total": "Hafta bo‘yicha jami ≈ {m3} m³ ({n} marta)",
+    "fields_title": "🌱 Dalalaringiz (✔ — faol):",
+    "field_btn": "{mark}{n}. {crop} · {area} ga · {place}",
+    "new_field": "➕ Yangi dala",
+    "field_active": "Faol dala: {n}. {crop} · {area} ga",
+    "gps": "GPS",
+    "help": "Suv Maslahatchi har kuni soat {hour}:00 da har bir dalangiz uchun maslahat yuboradi.\nHisob: FAO-56 (BMT FAO), ob-havo: Open-Meteo. «❓ Nega?» tugmasi maslahat qayerdan kelganini ko‘rsatadi.\nSug‘organingizdan keyin «✅ Sug‘ordim» ni bosing — hisob yangilanadi."
   },
   "web": {
     "nav_bucket": "Tuproq stakani",
@@ -110,8 +150,8 @@
     "unit_m3ha": "m³/ga",
     "unit_mm": "mm",
     "unit_days": "kun",
-    "mode_fao": "FAO-56 maslahati",
-    "mode_habit": "Odatiy jadval",
+    "mode_fao": "Suv Maslahatchi",
+    "mode_habit": "Odat",
     "habit_every": "Har necha kunda",
     "habit_mm": "Bir martada (mm, brutto)",
     "habit_note": "Odatiy jadvalni o‘zingiz kiriting — biz tayyor «tejash foizi» o‘ylab topmaymiz.",
@@ -149,7 +189,13 @@
     "kc_uz": "Mahalliy Kc (Farg‘ona, 2020)",
     "kc_fao": "FAO-56 jadval Kc",
     "habit_mm_hint": "1 mm = 10 m³/ga.",
-    "diff_note": "Bu — model ichidagi taqqoslash (bir xil ob-havo, bir xil tuproq), dalada o‘lchangan tejash emas."
+    "diff_note": "Bu — model ichidagi taqqoslash (bir xil ob-havo, bir xil tuproq), dalada o‘lchangan tejash emas.",
+    "habit_empty": "Fermer odatini kiriting: har necha kunda va bir martada necha mm sug‘oriladi. Qiymatlarni biz o‘ylab topmaymiz.",
+    "norm_title": "Me’yor nazorati: mavsumiy suv va gidromodul me’yori",
+    "norm_range": "Paxta mavsumiy me’yori",
+    "norm_note": "Yashil oraliq — paxtaning gidromodul rayonlari bo‘yicha mavsumiy me’yorlari, 2 800–6 200 m³/ga (Matyakubov va boshq., 2024), ma’lumotnoma sifatida. Ko‘k belgilar — Suv Maslahatchi: netto (ildizga yetgan suv) va brutto (samaradorlik bilan). Me’yor netto yoki brutto ekanini manbadan tekshiring. Dalaning gidromodul rayoni bu yerda aniqlanmagan; model sizot suvi hissasini hisobga olmaydi va ~25–30% yuqori (Ilmiy asos).",
+    "netto": "Netto",
+    "brutto": "Brutto"
   },
   "science": {
     "model_h": "Model: FAO-56 kunlik tuproq-suv balansi",
@@ -171,7 +217,7 @@
     ],
     "gap_h": "Validatsiya bo‘shlig‘i — biz hali nimani isbotlamaganmiz",
     "gap": [
-      "Maslahatlar hali dalada tekshirilmagan: tuproq namligi o‘lchovlari, suv hisoblagichi yoki hosil bilan solishtirilmagan.",
+      "Maslahatlar hali pilot dalada (suv hisoblagichi, tuproq namligi o‘lchovi) tekshirilmagan. Biz «bot X% suv tejaydi» demaymiz — bu o‘lchanmagan.",
       "Bosqich davomiyligi O‘zbekiston navlari va ekish muddatlari uchun kalibrlanmagan (FAO jadvalida O‘zbekiston qatori yo‘q).",
       "Grunt suvidan kapillyar ko‘tarilish hisobga olinmaydi. Grunt suvi sayoz dalalarda (masalan, Farg‘ona vodiysining ayrim qismlari) model suv talabini oshirib ko‘rsatishi mumkin.",
       "Sho‘r yuvish uchun qo‘shimcha suv (leaching) va sho‘rlanish stressi hisobga olinmaydi.",
@@ -188,9 +234,33 @@
     ],
     "refs_h": "Adabiyotlar",
     "refs": [
-      "Allen R.G., Pereira L.S., Raes D., Smith M. (1998). Crop evapotranspiration — Guidelines for computing crop water requirements. FAO Irrigation and Drainage Paper 56. Rim: FAO.",
-      "Kenjabaev Sh. va boshq., 2020 — Farg‘ona vodiysida o‘lchangan paxta va kuzgi bug‘doy Kc qiymatlari (2009–2011 dala tajribalari).",
-      "Open-Meteo: Historical Weather API va Forecast API (open-meteo.com)."
+      "Allen R.G., Pereira L.S., Raes D., Smith M. (1998). FAO-56: Crop evapotranspiration — https://www.fao.org/4/x0490e/x0490e0b.htm",
+      "Kenjabaev va boshq. (2020), Farg‘ona Kc va ETc — https://staff.tiiame.uz/storage/users/617/articles/v3mfhWMlDfuvVDxlbLX5J6W21Gs4eEDda8YgY40f.pdf",
+      "Pereira va boshq. (2009), Agric. Water Manag. 96(5) — https://ideas.repec.org/a/eee/agiwat/v96y2009i5p723-735.html",
+      "Matyakubov va boshq. (2024), gidromodul me’yorlari — https://www.scitepress.org/Papers/2024/137732/137732.pdf",
+      "Ibragimov, Evett va boshq., Toshkent tajribalari — https://www.irrigation.org/IA/FileUploads/IA/Resources/TechnicalPapers/2003/CottonAndWinterWheatIrrigationSchedulingImprovementsInUzbekistan.pdf",
+      "Fabregas, Kremer, Schilbach (2019), Science — https://agrinatura-eu.eu/realizing-the-potential-of-digital-development-the-case-of-agricultural-advice/",
+      "PAD (Precision Agriculture for Development) — https://precisiondev.org/tag/kremer/",
+      "Duflo, Kremer, Robinson (2011), AER — https://nber.org/papers/w15131",
+      "Open-Meteo Historical Weather API — https://open-meteo.com/en/docs/historical-weather-api"
+    ],
+    "validation_h": "Dala o‘lchovlari bilan solishtirish (halol natija)",
+    "validation": [
+      "Kenjabaev va boshq. (2020), Farg‘ona: paxta mavsumida ET0 863 mm, o‘lchangan haqiqiy ETc 560 ± 50 mm (ETc/ET0 = 0,65).",
+      "Bizning model (mahalliy Kc, mavsum ET0 si 863 mm ga normallashtirilgan, mavsum shakli sintetik): potensial ETc 690–730 mm (0,80–0,85; ekish sanasiga bog‘liq). Qayta hisoblash: scripts/validate_kenjabaev.py.",
+      "Xulosa: model taxminan 25–30% yuqori. Sabablari: (1) model stresssiz (potensial) iste’molni hisoblaydi, dala o‘lchovi esa fermer sharoitidagi haqiqiy iste’mol; (2) bosqich davomiyligi mahalliy emas; (3) sizot suvi hissasi hisobga olinmagan (Pereira, 2009).",
+      "Shuning uchun maslahat hozircha ehtiyotkor: ekinni stressga tushirmaydi. Hududiy koeffitsient kc_scale (yadroda tayyor) pilotda Smart Water hisoblagichlari va gidromodul me’yorlari asosida aniqlanadi."
+    ],
+    "evidence_h": "Telefon orqali maslahat ishlaydimi? (boshqalarning natijalari, bizniki emas)",
+    "evidence": [
+      "PAD (Precision Agriculture for Development; hammuassislar — Michael Kremer va Shawn Cole) telefon orqali agro-maslahatni 1 milliondan ortiq fermerga yetkazadi.",
+      "Fabregas, Kremer, Schilbach (Science, 2019): telefon orqali agro-ma’lumot hosilni 4% ga oshirgan va tavsiya qilingan usulni qabul qilish ehtimolini 22% ga ko‘targan.",
+      "Duflo, Kremer, Robinson (AER, 2011): to‘g‘ri paytda berilgan kichik turtki samarali. Shuning uchun xabar har kuni 07:00 da keladi va «✅ Sug‘ordim» — bir bosish."
+    ],
+    "authors_h": "Mualliflar",
+    "authors": [
+      "Saynatov Yodgor",
+      "Raxmatullayev Sarvar"
     ]
   }
 }
