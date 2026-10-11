@@ -27,6 +27,12 @@ DECISION = {
     "KAPITALLASHTIRILGAN, KEYIN HISOBDAN CHIQARILGAN": "KAPITALLASHTIRILGAN, KEYIN HISOBDAN CHIQARILGAN",
     "STANDART QO'LLANILMAYDI": "STANDART QO'LLANILMAYDI",
 }
+DECISION_SHORT = {
+    "XARAJAT SIFATIDA TAN OLINADI": "Xarajat",
+    "KAPITALLASHTIRILADI": "Kapitallashtiriladi",
+    "KAPITALLASHTIRILGAN, KEYIN HISOBDAN CHIQARILGAN": "Hisobdan chiqarilgan",
+    "STANDART QO'LLANILMAYDI": "Qo'llanilmaydi",
+}
 CRITERION = {
     "K1_technical_feasibility": "K1. Texnik jihatdan amalga oshirish mumkinligi",
     "K2_intention": "K2. Yakunlash va foydalanish/sotish niyati",
@@ -332,3 +338,17 @@ def money(v) -> str:
 
 def fdate(d) -> str:
     return d.strftime("%d.%m.%Y") if d else ""
+
+# ------------------------------------------------------------------ M8 reconciliation reasons
+REC_REASON = {
+    "row": "{date} {category} {amount} so'm: IAS 38 — {ias}, BHMS 11 — {nas}",
+    "k3": "K3 (foydalanish yoki sotish qobiliyati) bajarilmagan — IAS 38 bo'yicha xarajatga, BHMS 11 bo'yicha "
+          "kapitallashtirilgan (BHMS 11 da alohida mezon yo'q)",
+    "months": "Amortizatsiya muddati: IAS 38 — {ias} oy, BHMS 11 — {nas} oy (BHMS 11, 16-band: 5 yildan oshmaydi)",
+    "nas_writeoff": "BHMS 11, 18-band bo'yicha {amount} so'm hisobdan chiqarilgan; IAS 38 bo'yicha faqat "
+                    "qadrsizlanish belgisi (IAS 36.9, 36.12)",
+    "limit": "BHMS 11, 13-band: kutilayotgan sof nafdan oshgan {amount} so'm xarajatga o'tkazilgan; IAS 38 da "
+             "tan olishda chegara yo'q",
+    "none": "Farq yo'q",
+    "scope": "Standart qo'llanilmaydi",
+}
