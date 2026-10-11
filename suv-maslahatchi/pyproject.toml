@@ -1,0 +1,24 @@
+[project]
+name = "suv-maslahatchi"
+version = "0.1.0"
+description = "Sug‘orish maslahatchisi (FAO-56) — Telegram bot va sahna demosi"
+authors = [{ name = "Saynatov Yodgor" }, { name = "Raxmatullayev Sarvar" }]
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["web", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # o‘zbekcha ‘ ’ belgilar ataylab ishlatiladi
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"

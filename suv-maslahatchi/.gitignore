@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dist/
+*.sqlite3
+*.db
+.venv/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+data/*.sqlite3
+web/node_modules/
+web/dist/
