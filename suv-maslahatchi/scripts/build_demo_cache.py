@@ -10,13 +10,14 @@ import argparse
 import json
 import sys
 import time
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from engine import suv_engine as se
 
+UTC = timezone.utc   # Python 3.10 bilan mos (datetime.UTC 3.11+ da)
 OUT = Path(__file__).resolve().parents[1] / "data" / "cache"
 
 # id, joy, lat, lon, boshlanish, tugash, ekin, namuna ekish sanasi

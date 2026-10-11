@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,8 @@ from app.db.repo import Repo
 from app.services.demo_cache import get_cache
 from app.services.weather import WeatherClient
 from engine.suv_engine import Field
+
+UTC = timezone.utc
 
 TODAY = date(2025, 7, 10)
 
