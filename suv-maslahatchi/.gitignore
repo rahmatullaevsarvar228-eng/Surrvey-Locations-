@@ -14,3 +14,5 @@ htmlcov/
 data/*.sqlite3
 web/node_modules/
 web/dist/
+web/tsconfig.tsbuildinfo
+data/weather/

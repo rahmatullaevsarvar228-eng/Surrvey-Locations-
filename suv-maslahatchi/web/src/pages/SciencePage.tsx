@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useT } from "../lib/i18n";
 
 const SECTIONS: { h: string; items: string; tone: string; ordered?: boolean }[] = [
@@ -10,9 +11,16 @@ const SECTIONS: { h: string; items: string; tone: string; ordered?: boolean }[] 
 
 export function SciencePage() {
   const { t, list } = useT();
+  const [qr, setQr] = useState(true);
   return (
     <article className="max-w-3xl space-y-4">
       <h1 className="text-[28px] font-semibold">{t("web.science_title")}</h1>
+      {qr && (
+        <figure className="card flex items-center gap-4">
+          <img src="/bot-qr.svg" alt="" width={140} height={140} className="bg-white rounded p-1" onError={() => setQr(false)} />
+          <figcaption className="text-xl font-semibold">{t("web.qr_title")}</figcaption>
+        </figure>
+      )}
       {SECTIONS.map((s) => {
         const L = s.ordered ? "ol" : "ul";
         return (

@@ -1,0 +1,40 @@
+"""Har kuni soat 07:00 (Asia/Tashkent) barcha dalalar uchun maslahat yuborish."""
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from aiogram import Bot
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+from app.core.config import Settings
+from app.db.repo import Repo
+from app.services.weather import WeatherClient
+
+from . import keyboards as kb
+from . import service
+
+log = logging.getLogger(__name__)
+
+
+async def send_daily(bot: Bot, repo: Repo, wc: WeatherClient) -> int:
+    sent = 0
+    for row in repo.latest_field_per_user():
+        try:
+            rep = await asyncio.to_thread(service.advice_for_user, repo, wc, row.user_id)
+            await bot.send_message(row.user_id, rep.text,
+                                   reply_markup=kb.advice_kb(repo.lang(row.user_id), rep.field_id))
+            sent += 1
+        except Exception:   # bitta foydalanuvchi xatosi qolganlarni to‘xtatmasin
+            log.exception("kundalik xabar yuborilmadi: user=%s", row.user_id)
+        await asyncio.sleep(0.05)   # Telegram limitlari
+    log.info("kundalik maslahat: %s ta yuborildi", sent)
+    return sent
+
+
+def make_scheduler(bot: Bot, repo: Repo, wc: WeatherClient, st: Settings) -> AsyncIOScheduler:
+    sch = AsyncIOScheduler(timezone=st.tz)
+    sch.add_job(send_daily, CronTrigger(hour=st.advice_hour, minute=0, timezone=st.tz),
+                args=[bot, repo, wc], id="daily_advice", misfire_grace_time=3600, coalesce=True)
+    return sch

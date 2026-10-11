@@ -48,7 +48,7 @@
   },
   "errors": {
     "weather": "Ob-havo ma’lumoti hozir olinmadi, 1 soatdan keyin qayta urinamiz.",
-    "no_cache": "Demo ob-havo keshi topilmadi. Internetga ulangan holda `make cache` buyrug‘ini ishga tushiring.",
+    "no_cache": "Demo ob-havo keshi topilmadi. Internetga ulangan holda «make cache» buyrug‘ini ishga tushiring.",
     "no_field": "Avval dala qo‘shing: /start",
     "bad_input": "Tushunmadim, iltimos qaytadan kiriting.",
     "synthetic": "SINTETIK OB-HAVO — haqiqiy emas, faqat sinov uchun."
