@@ -8,6 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from .. import clock
 from ..core.appsettings import AppSettings
 from ..core.engine import FRAMEWORKS
 from ..core.rules import reason_text, rule_code, rule_ref
@@ -34,7 +35,7 @@ def _title(ws, title: str, settings: AppSettings, sub: str = "", demo: bool = Fa
         ws["A4"] = uz.DEMO_MARK
         ws["A4"].font = Font(italic=True, color="8A6100")
         row = 5
-    ws[f"A{row}"] = f"Tuzilgan: {datetime.now():%d.%m.%Y %H:%M} · {uz.APP_NAME}"
+    ws[f"A{row}"] = f"Tuzilgan: {clock.now_tashkent()} (Toshkent, UTC+5) · {uz.APP_NAME}"
     ws[f"A{row}"].font = Font(size=9, color="5F6368")
     return row + 2
 
@@ -121,7 +122,7 @@ def export_schedule(analyses: list[Analysis], path, settings: AppSettings):
 
 # ---------------------------------------------------------------- M8
 def export_reconcile(analyses: list[Analysis], path, settings: AppSettings):
-    at = analyses[0].as_of if analyses else date.today()
+    at = analyses[0].as_of if analyses else clock.today()
     wb = Workbook()
     ws = wb.active
     ws.title = "Solishtirma"
@@ -207,8 +208,28 @@ def export_findings(analyses: list[Analysis], path, settings: AppSettings, signe
     r += 1
     ws.cell(r, 1, f"Jami istisnolar: {len(items)}").font = Font(bold=True)
     ws.cell(r + 2, 1, "Imzo:")
-    ws.cell(r + 2, 2, f"{signer.name}, {uz.ROLE.get(signer.role, signer.role)}, {uz.fdate(date.today())}")
+    ws.cell(r + 2, 2, f"{signer.name}, {uz.ROLE.get(signer.role, signer.role)}, {uz.fdate(clock.today())}")
     ws.cell(r + 3, 2, "______________________")
     _widths(ws, [10, 6, 16, 44, 10, 110, 12])
     wb.save(path)
 
+
+
+# ---------------------------------------------------------------- M11
+def export_audit_log(rows, path, settings: AppSettings):
+    """Audit log; time shown in Tashkent (UTC+5), stored in UTC."""
+    import json
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Audit jurnali"
+    r = _title(ws, "Audit jurnali", settings, "Har bir o'zgarish: kim, qachon, nima edi → nima bo'ldi")
+    _header(ws, r, [uz.t("col.when"), uz.t("col.who"), uz.t("col.role"), uz.t("col.action"), uz.t("col.object"),
+                    uz.t("col.before"), uz.t("col.after")])
+    r += 1
+    for x in rows:
+        obj = f"{x.entity} #{x.entity_id}" if x.entity_id is not None else x.entity
+        r = _put(ws, r, [clock.fmt_tashkent(x.at), x.actor, uz.ROLE.get(x.role, x.role), x.action, obj,
+                         json.dumps(x.before, ensure_ascii=False) if x.before is not None else "",
+                         json.dumps(x.after, ensure_ascii=False) if x.after is not None else ""])
+    _widths(ws, [21, 24, 26, 10, 20, 60, 60])
+    wb.save(path)

@@ -14,6 +14,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from .. import clock
 from ..core.appsettings import AppSettings
 from ..i18n import uz
 from ..services import Analysis
@@ -116,10 +117,10 @@ def export_audit_report(analyses: list[Analysis], path, settings: AppSettings, s
 
     story += [Spacer(1, 10 * mm),
               P(f"Tayyorladi: {signer.name}, {uz.ROLE.get(signer.role, signer.role)}"),
-              P(f"Sana: {uz.fdate(date.today())}"),
+              P(f"Sana: {uz.fdate(clock.today())}"),
               Spacer(1, 6 * mm), P("Imzo: ____________________________"),
               Spacer(1, 6 * mm),
-              P(f"{uz.APP_NAME} dasturida {datetime.now():%d.%m.%Y %H:%M} da avtomatik tuzildi.", small)]
+              P(f"{uz.APP_NAME} dasturida {clock.now_tashkent()} (Toshkent, UTC+5) da avtomatik tuzildi.", small)]
 
     def footer(canvas, d):
         canvas.saveState()

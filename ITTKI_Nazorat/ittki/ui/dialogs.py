@@ -213,10 +213,13 @@ class AssessmentDialog(QDialog):
     """New assessment version. 'Ha' requires an evidence document; otherwise it can only be
     saved explicitly as a draft (then E1 is raised)."""
 
-    def __init__(self, repo, user: User, pid: int, today: date, prev: Optional[AssessmentRecord] = None,
+    def __init__(self, service, user: User, pid: int, today: date, prev: Optional[AssessmentRecord] = None,
                  parent=None):
         super().__init__(parent)
-        self.repo, self.user, self.pid = repo, user, pid
+        from ..services import Service
+        # accepts the Service (normal use) or a bare Repository (wrapped, so the same permission check applies)
+        self.service = service if isinstance(service, Service) else Service(service)
+        self.repo, self.user, self.pid = self.service.repo, user, pid
         self.setWindowTitle(uz.t("btn.new_assessment"))
         lay = QVBoxLayout(self)
         top = QFormLayout()
@@ -241,6 +244,8 @@ class AssessmentDialog(QDialog):
         save.setObjectName("Primary")
         draft = bb.addButton(uz.t("btn.save_draft"), QDialogButtonBox.ActionRole)
         bb.addButton(uz.t("btn.cancel"), QDialogButtonBox.RejectRole)
+        for b in (save, draft):                      # only Loyiha rahbari saves assessments (also drafts)
+            b.setEnabled(self.service.can(user, "assessment"))
         save.clicked.connect(lambda: self._save(False))
         draft.clicked.connect(lambda: self._save(True))
         bb.rejected.connect(self.reject)
@@ -254,7 +259,7 @@ class AssessmentDialog(QDialog):
 
     def _save(self, draft: bool):
         try:
-            self.saved_id = self.repo.add_assessment(self.record(draft), self.user)
+            self.saved_id = self.service.add_assessment(self.user, self.record(draft))
         except EvidenceRequired as e:
             names = "\n".join("• " + uz.CRITERION[k] for k in e.keys)
             if choose(self, uz.t("crit.need_evidence", criterion="\n" + names),

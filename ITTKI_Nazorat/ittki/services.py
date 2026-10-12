@@ -6,11 +6,13 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Callable, Optional
 
+from . import clock
 from .core import engine, journal as jr
 from .core.appsettings import AppSettings
 from .core.controls import Finding, check_project
 from .core.rules import rule_code
-from .db.repository import ProjectRecord, Repository
+from .db.repository import (AssessmentRecord, CostRecord, ImpairmentTest, ProjectRecord, Repository, User)
+from .permissions import PermissionDenied, allowed, enforce
 from .i18n import uz
 
 FWS = engine.FRAMEWORKS
@@ -36,8 +38,18 @@ class Analysis:
         return self.project.scope == "rnd"
 
 
+class DemoRefused(ValueError):
+    """Demo data are loaded only into an empty database."""
+
+
+REPORT_KINDS = ("schedule", "reconcile", "costs", "findings", "note", "audit_pdf", "template", "audit_log")
+
+
 class Service:
-    def __init__(self, repo: Repository, today: Callable[[], date] = date.today):
+    """Single entry point for every action of the interface. Each action is checked here against
+    ittki.permissions (`enforce`), and refused attempts are written to the audit log."""
+
+    def __init__(self, repo: Repository, today: Callable[[], date] = clock.today):
         self.repo = repo
         self._today = today
 
@@ -47,6 +59,116 @@ class Service:
     @property
     def settings(self) -> AppSettings:
         return self.repo.settings()
+
+    # ---- permissions ------------------------------------------------------------
+    def authorize(self, user: User, action: str):
+        """Raises PermissionDenied (and audits the attempt) if `user` may not do `action`."""
+        enforce(self.repo, user, action)
+
+    @staticmethod
+    def can(user: User, action: str) -> bool:
+        """For enabling buttons only: no audit record."""
+        return allowed(user.role, action)
+
+    def can_load_demo(self, user: User) -> bool:
+        return self.can(user, "demo") and not self.repo.projects()
+
+    # ---- actions (each one checked) ---------------------------------------------
+    def save_project(self, user: User, rec: ProjectRecord) -> int:
+        self.authorize(user, "project")
+        return self.repo.save_project(rec, user)
+
+    def change_stage(self, user: User, pid: int, to_stage: str, on: date, note: str = "",
+                     useful_life_months: Optional[int] = None) -> ProjectRecord:
+        self.authorize(user, "stage")
+        if useful_life_months is not None:
+            rec = self.repo.project(pid)
+            if rec.useful_life_months != useful_life_months:
+                rec.useful_life_months = useful_life_months
+                self.repo.save_project(rec, user)
+        return self.repo.change_stage(pid, to_stage, on, user, note)
+
+    def add_assessment(self, user: User, a: AssessmentRecord) -> int:
+        self.authorize(user, "assessment")
+        return self.repo.add_assessment(a, user)
+
+    def add_cost(self, user: User, c: CostRecord) -> int:
+        self.authorize(user, "cost")
+        return self.repo.add_cost(c, user)
+
+    def update_cost(self, user: User, c: CostRecord):
+        self.authorize(user, "cost")
+        return self.repo.update_cost(c, user)
+
+    def delete_cost(self, user: User, cost_id: int):
+        self.authorize(user, "cost")
+        return self.repo.delete_cost(cost_id, user)
+
+    def read_import(self, user: User, pid: int, path) -> tuple[list, list]:
+        """Parse an import file (checked: 'import'). Returns (records, errors)."""
+        self.authorize(user, "import")
+        from .reports.excel_import import read_costs
+        return read_costs(path, pid)
+
+    def import_costs(self, user: User, records: list) -> int:
+        self.authorize(user, "import")
+        return self.repo.add_costs(records, user)
+
+    def set_impairment_event(self, user: User, pid: int, on: Optional[date], recoverable: Optional[int]):
+        self.authorize(user, "impairment")
+        return self.repo.set_impairment_event(pid, on, recoverable, user)
+
+    def add_impairment_test(self, user: User, t: ImpairmentTest) -> int:
+        self.authorize(user, "impairment")
+        return self.repo.add_impairment_test(t, user)
+
+    def delete_impairment_test(self, user: User, test_id: int):
+        self.authorize(user, "impairment")
+        return self.repo.delete_impairment_test(test_id, user)
+
+    def save_settings(self, user: User, new: AppSettings) -> list[str]:
+        self.authorize(user, "settings")
+        return self.repo.save_settings(new, user)
+
+    def load_demo(self, user: User) -> int:
+        self.authorize(user, "demo")
+        if self.repo.projects():
+            raise DemoRefused(uz.t("home.demo_not_empty"))
+        from .demo import load_demo
+        n = load_demo(self.repo)
+        with self.repo._tx():
+            self.repo._audit(user, "create", "demo", None, None, {"projects": n})
+        return n
+
+    def backup(self, user: User, path) -> None:
+        self.authorize(user, "backup")
+        self.repo.backup(path)
+
+    def export(self, user: User, kind: str, path, as_of: Optional[date] = None, start: Optional[date] = None,
+               end: Optional[date] = None, analyses: Optional[list] = None) -> None:
+        """All reports and exports. `analyses` limits the report to given projects (e.g. one card)."""
+        self.authorize(user, "report")
+        from .reports import excel, excel_import, pdf, word
+        st = self.settings
+        at = as_of or self.today()
+        if kind == "template":
+            return excel_import.write_template(path)
+        if kind == "audit_log":
+            return excel.export_audit_log(self.repo.audit_log(), path, st)
+        if kind == "note":
+            return word.export_note(analyses or self.analyze_all(end), path, st, start, end)
+        an = analyses or self.analyze_all(at)
+        if kind == "schedule":
+            return excel.export_schedule(an, path, st)
+        if kind == "reconcile":
+            return excel.export_reconcile(an, path, st)
+        if kind == "costs":
+            return excel.export_costs(an, path, st)
+        if kind == "findings":
+            return excel.export_findings(an, path, st, user, at)
+        if kind == "audit_pdf":
+            return pdf.export_audit_report(an, path, st, user, at)
+        raise ValueError(kind)
 
     # ---- analysis ---------------------------------------------------------
     def analyze(self, pid: int, as_of: Optional[date] = None, settings: Optional[AppSettings] = None) -> Analysis:

@@ -7,8 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from ittki import clock  # noqa: E402
 from ittki.db.repository import Repository, User  # noqa: E402
-from ittki.demo import load_demo  # noqa: E402
 from ittki.reports.excel import export_costs, export_findings, export_reconcile, export_schedule  # noqa: E402
 from ittki.reports.pdf import export_audit_report  # noqa: E402
 from ittki.reports.word import export_note  # noqa: E402
@@ -19,9 +19,10 @@ TODAY = date(2026, 10, 11)
 
 def main(out: Path):
     out.mkdir(parents=True, exist_ok=True)
+    clock.set_fixed(TODAY)                      # same fixed date as the screenshots
     repo = Repository(Path(tempfile.mkdtemp()) / "demo.sqlite3")
-    load_demo(repo)
-    svc = Service(repo, today=lambda: TODAY)
+    svc = Service(repo)
+    svc.load_demo(User("Raxmatullayev S.N.", "accountant"))
     st = svc.settings
     signer = User("Raxmatullayev S.N.", "auditor")
     an = svc.analyze_all()

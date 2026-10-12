@@ -14,6 +14,7 @@ from ..core.defaults import ACCOUNT_NAMES, DEFAULT_ACCOUNTS, DEFAULT_CONTROLS
 from ..core.engine import AMORT_START_MODES, FRAMEWORKS, Settings
 from ..core.journal import Accounts
 from ..db.repository import User
+from .. import clock
 from ..i18n import uz
 from ..services import Service
 from . import style
@@ -81,7 +82,7 @@ class HomePage(Page):
         b.addWidget(self.b_backup)
         b.addStretch()
         self.lay.addLayout(b)
-        self.b_demo.setEnabled(not self.readonly)
+        self.b_backup.setEnabled(service.can(user, "backup"))
 
     def _set(self, key, value, sub=""):
         lab = self.c[key].value_label
@@ -109,6 +110,8 @@ class HomePage(Page):
                          Cell(f"{len(a.findings)}" + (f" ({high} yuqori)" if high else ""), "center",
                               fg=style.RED if high else None)])
         fill_table(self.table, rows)
+        # Buxgalter only, and only into an empty database
+        self.b_demo.setEnabled(self.service.can_load_demo(self.user))
 
     def _open(self):
         pid = selected_data(self.table)
@@ -116,16 +119,23 @@ class HomePage(Page):
             self.open_project.emit(pid)
 
     def _demo(self):
-        from ..demo import load_demo
-        n = load_demo(self.repo)
+        if not can(self, self.service, self.user, "demo"):
+            return
+        try:
+            n = self.service.load_demo(self.user)
+        except ValueError as e:                       # DemoRefused: the database is not empty
+            error(self, str(e))
+            return
         info(self, T("home.demo_done") if n else T("home.demo_exists"))
         self.changed.emit()
 
     def _backup(self):
-        name = f"ittki_zaxira_{date.today():%Y%m%d}.sqlite3"
+        if not can(self, self.service, self.user, "backup"):
+            return
+        name = f"ittki_zaxira_{self.service.today():%Y%m%d}.sqlite3"
         path, _ = QFileDialog.getSaveFileName(self, T("home.backup"), name, "SQLite (*.sqlite3)")
         if path:
-            self.repo.backup(path)
+            self.service.backup(self.user, path)
             info(self, T("home.backup_done", path=path))
 
 
@@ -138,7 +148,7 @@ class ProjectsPage(Page):
         h.addStretch()
         self.b_new = QPushButton(T("projects.new")); self.b_new.setObjectName("Primary")
         self.b_new.clicked.connect(self._new)
-        self.b_new.setEnabled(not self.readonly)
+        self.b_new.setEnabled(service.can(user, "project"))
         self.b_open = QPushButton(T("projects.open"))
         self.b_open.clicked.connect(self._open)
         h.addWidget(self.b_open)
@@ -203,11 +213,15 @@ class ProjectsPage(Page):
         self.open_project.emit(pid)
 
     def _new(self):
-        if not can(self, self.repo, self.user, "project"):
+        if not can(self, self.service, self.user, "project"):
             return
         d = NewProjectDialog(self.repo, self)
         if d.exec():
-            pid = self.repo.save_project(d.record(), self.user)
+            try:
+                pid = self.service.save_project(self.user, d.record())
+            except PermissionError as e:
+                error(self, str(e))
+                return
             self.changed.emit()
             self.open_project.emit(pid)
 
@@ -275,65 +289,40 @@ class ReportsPage(Page):
         self.lay.addWidget(g)
         btns = QGroupBox("Fayllar")
         v = QVBoxLayout(btns)
-        for key, fn, ext in (("rep.amort", self._amort, "xlsx"), ("rep.reconcile", self._reconcile, "xlsx"),
-                             ("rep.costs", self._costs, "xlsx"), ("rep.note", self._note, "docx"),
-                             ("rep.audit", self._audit, "pdf"), ("rep.audit_xlsx", self._audit_xlsx, "xlsx"),
-                             ("rep.template", self._template, "xlsx")):
+        for key, kind, ext in (("rep.amort", "schedule", "xlsx"), ("rep.reconcile", "reconcile", "xlsx"),
+                               ("rep.costs", "costs", "xlsx"), ("rep.note", "note", "docx"),
+                               ("rep.audit", "audit_pdf", "pdf"), ("rep.audit_xlsx", "findings", "xlsx"),
+                               ("rep.audit_log", "audit_log", "xlsx"), ("rep.template", "template", "xlsx")):
             b = QPushButton(T(key))
             b.setMinimumHeight(32)
             b.setStyleSheet("text-align: left; padding-left: 12px;")
-            b.clicked.connect(lambda _=False, fn=fn, ext=ext, key=key: self._run(fn, ext, key))
+            b.setEnabled(service.can(user, "report"))
+            b.clicked.connect(lambda _=False, kind=kind, ext=ext, key=key: self._run(kind, ext, key))
             v.addWidget(b)
         self.lay.addWidget(btns)
         self.lay.addStretch()
 
     _NAMES = {"rep.amort": "amortizatsiya_jadvali", "rep.reconcile": "BHMS_MHXS_solishtirma",
               "rep.costs": "xarajatlar_jurnali", "rep.note": "izoh_BHMS11_IAS38", "rep.audit": "audit_qomitasi",
-              "rep.audit_xlsx": "istisnolar", "rep.template": "xarajatlar_shablon"}
+              "rep.audit_xlsx": "istisnolar", "rep.audit_log": "audit_jurnali", "rep.template": "xarajatlar_shablon"}
 
-    def _run(self, fn, ext, key):
-        if not can(self, self.repo, self.user, "report"):
+    def _run(self, kind, ext, key):
+        if not can(self, self.service, self.user, "report"):
             return
         path, _ = QFileDialog.getSaveFileName(self, T(key), f"{self._NAMES[key]}.{ext}", f"*.{ext}")
         if not path:
             return
         try:
-            fn(path)
+            self.service.export(self.user, kind, path, as_of=self.d_at.value(), start=self.d_from.value(),
+                                end=self.d_to.value(),
+                                analyses=self.service.analyze_all() if kind in ("schedule", "costs") else None)
+        except PermissionError as e:
+            error(self, str(e))
+            return
         except Exception as e:      # report generation must not crash the program
             error(self, f"{type(e).__name__}: {e}")
             return
         info(self, T("rep.saved", path=path))
-
-    def _an(self, at=None):
-        return self.service.analyze_all(at)
-
-    def _amort(self, path):
-        from ..reports.excel import export_schedule
-        export_schedule(self._an(), path, self.service.settings)
-
-    def _reconcile(self, path):
-        from ..reports.excel import export_reconcile
-        export_reconcile(self._an(self.d_at.value()), path, self.service.settings)
-
-    def _costs(self, path):
-        from ..reports.excel import export_costs
-        export_costs(self._an(), path, self.service.settings)
-
-    def _note(self, path):
-        from ..reports.word import export_note
-        export_note(self._an(self.d_to.value()), path, self.service.settings, self.d_from.value(), self.d_to.value())
-
-    def _audit(self, path):
-        from ..reports.pdf import export_audit_report
-        export_audit_report(self._an(self.d_at.value()), path, self.service.settings, self.user, self.d_at.value())
-
-    def _audit_xlsx(self, path):
-        from ..reports.excel import export_findings
-        export_findings(self._an(self.d_at.value()), path, self.service.settings, self.user, self.d_at.value())
-
-    def _template(self, path):
-        from ..reports.excel_import import write_template
-        write_template(path)
 
 
 # ---------------------------------------------------------------- Sozlamalar
@@ -412,7 +401,7 @@ class SettingsPage(Page):
         h.addStretch()
         self.b_save = QPushButton(T("btn.save")); self.b_save.setObjectName("Primary")
         self.b_save.clicked.connect(self._save)
-        self.b_save.setEnabled(not self.readonly)
+        self.b_save.setEnabled(service.can(user, "settings"))
         h.addWidget(self.b_save)
         self.lay.addLayout(h)
 
@@ -431,7 +420,7 @@ class SettingsPage(Page):
             e.setText(s.accounts.source[c])
 
     def _save(self):
-        if not can(self, self.repo, self.user, "settings"):
+        if not can(self, self.service, self.user, "settings"):
             return
         try:
             inc = {fw: {c for c in CATEGORY_ORDER if self.cat_checks[(c, fw)].isChecked()} for fw in FRAMEWORKS}
@@ -441,7 +430,10 @@ class SettingsPage(Page):
                                   source={c: e.text().strip() for c, e in self.src.items()}),
                 controls=ControlSettings(**{k: sp.value() for k, sp in self.thr.items()}),
                 organization=self.org.text().strip(), language=self.lang.currentData())
-            changed = self.repo.save_settings(new, self.user)
+            changed = self.service.save_settings(self.user, new)
+        except PermissionError as e:
+            error(self, str(e))
+            return
         except (AssertionError, ValueError, TypeError) as e:
             error(self, T("set.invalid", error=e))
             return
@@ -458,6 +450,16 @@ class AuditPage(Page):
                    "yoki tahrirlab bo'lmaydi.")
         n.setObjectName("Muted")
         self.lay.addWidget(n)
+        h = QHBoxLayout()
+        tz = QLabel("Vaqt Toshkent vaqtida (UTC+5) ko'rsatiladi; bazada UTC saqlanadi.")
+        tz.setObjectName("Muted")
+        h.addWidget(tz)
+        h.addStretch()
+        self.b_export = QPushButton(T("btn.export"))
+        self.b_export.setEnabled(service.can(user, "report"))
+        self.b_export.clicked.connect(self._export)
+        h.addWidget(self.b_export)
+        self.lay.addLayout(h)
         self.table = make_table([T("col.when"), T("col.who"), T("col.role"), T("col.action"), T("col.object"),
                                  T("col.before"), T("col.after")], stretch=6)
         self.lay.addWidget(self.table, 1)
@@ -469,7 +471,15 @@ class AuditPage(Page):
             def j(v):
                 s = json.dumps(v, ensure_ascii=False) if v is not None else ""
                 return s if len(s) < 160 else s[:157] + "..."
-            rows.append([r.at.replace("T", " "), r.actor, uz.ROLE.get(r.role, r.role), r.action,
+            rows.append([clock.fmt_tashkent(r.at), r.actor, uz.ROLE.get(r.role, r.role), r.action,
                          f"{r.entity} #{r.entity_id}" if r.entity_id is not None else r.entity, j(r.before),
                          j(r.after)])
         fill_table(self.table, rows)
+
+    def _export(self):
+        if not can(self, self.service, self.user, "report"):
+            return
+        path, _ = QFileDialog.getSaveFileName(self, T("rep.audit_log"), "audit_jurnali.xlsx", "*.xlsx")
+        if path:
+            self.service.export(self.user, "audit_log", path)
+            info(self, T("rep.saved", path=path))

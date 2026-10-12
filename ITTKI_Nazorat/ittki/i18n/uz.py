@@ -62,6 +62,9 @@ LEVEL = {"high": "Yuqori", "medium": "O'rta", "info": "Ma'lumot"}
 PROJECT_STATUS = {"active": "Faol", "ready": "Foydalanishga tayyor", "abandoned": "To'xtatilgan"}
 
 PERM_ACTION = {
+    "view": "ko'rish",
+    "demo": "demo ma'lumotlarni yuklash",
+    "backup": "zaxira nusxa olish",
     "project": "loyiha ma'lumotlarini saqlash",
     "stage": "bosqichni o'zgartirish",
     "assessment": "mezonlar bahosini saqlash",
@@ -69,7 +72,7 @@ PERM_ACTION = {
     "import": "xarajatlarni Exceldan import qilish",
     "impairment": "qadrsizlanish hodisasi va testlarini kiritish",
     "settings": "sozlamalarni saqlash",
-    "report": "hisobotlarni tuzish",
+    "report": "hisobotlar va eksportni tuzish",
 }
 
 JOURNAL_OPS = {
@@ -139,6 +142,7 @@ UI = {
     "home.demo": "Demo ma'lumotlarni yuklash",
     "home.demo_done": "Demo ma'lumotlar yuklandi",
     "home.demo_exists": "Demo loyihalar allaqachon mavjud",
+    "home.demo_not_empty": "Demo ma'lumotlar faqat bo'sh bazaga yuklanadi: bazada loyihalar bor.",
     "home.backup": "Zaxira nusxa",
     "home.backup_done": "Zaxira nusxa saqlandi: {path}",
     "home.by_project": "Loyihalar bo'yicha",
@@ -179,7 +183,7 @@ UI = {
     "col.level": "Daraja",
     "col.project": "Loyiha",
     "col.message": "Tavsif",
-    "col.when": "Vaqt",
+    "col.when": "Vaqt (Toshkent, UTC+5)",
     "col.who": "Kim",
     "col.role": "Rol",
     "col.action": "Amal",
@@ -290,6 +294,7 @@ UI = {
     "rep.audit": "Audit qo'mitasi uchun hisobot (PDF)",
     "rep.audit_xlsx": "Istisnolar hisoboti (Excel)",
     "rep.template": "Xarajatlar import shabloni (Excel)",
+    "rep.audit_log": "Audit jurnali (Excel)",
     "rep.saved": "Hisobot saqlandi: {path}",
     "rep.signer": "Imzolovchi",
     # settings

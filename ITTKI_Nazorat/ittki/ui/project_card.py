@@ -13,6 +13,7 @@ from ..core.defaults import ACCOUNT_NAMES
 from ..core.engine import CRITERIA, FRAMEWORKS, _assessment_status
 from ..core.rules import rule_code, rule_ref, reason_text
 from ..db.repository import ImpairmentTest, User
+from .. import clock
 from ..i18n import uz
 from ..services import Analysis, Service, cost_rows
 from . import style
@@ -71,11 +72,22 @@ class ProjectCard(QWidget):
             self.on_change()
 
     def _can(self, action: str) -> bool:
-        return can(self, self.repo, self.user, action)
+        """Checked in the service layer; a refusal shows 'Ruxsat yo'q' and is audited."""
+        return can(self, self.service, self.user, action)
 
-    def _ro(self, *widgets):
+    def _perm(self, action: str, *widgets):
+        """Buttons of actions the role may not perform are disabled (table in ittki.permissions)."""
         for w in widgets:
-            w.setEnabled(not self.readonly)
+            w.setEnabled(self.service.can(self.user, action))
+
+    def _call(self, fn, *args):
+        try:
+            return True, fn(self.user, *args)
+        except PermissionError as e:
+            error(self, str(e))
+        except ValueError as e:
+            error(self, str(e))
+        return False, None
 
     def refresh(self):
         self.rec = self.repo.project(self.pid)
@@ -151,7 +163,8 @@ class ProjectCard(QWidget):
             h.addWidget(x)
         r.addLayout(h)
         outer.addWidget(right, 2)
-        self._ro(self.b_save, self.b_imp, self.b_test_add, self.b_test_del)
+        self._perm("project", self.b_save)
+        self._perm("impairment", self.b_imp, self.b_test_add, self.b_test_del)
         self.tabs.addTab(w, T("tab.info"))
 
     def _fill_info(self):
@@ -199,8 +212,8 @@ class ProjectCard(QWidget):
         p.phases_separable = self.f_sep.isChecked()
         p.useful_life_months = self.f_life.value()
         p.note = self.f_note.toPlainText()
-        self.repo.save_project(p, self.user)
-        self._changed()
+        if self._call(self.service.save_project, p)[0]:
+            self._changed()
 
     def _save_impairment(self):
         if not self._can("impairment"):
@@ -213,16 +226,16 @@ class ProjectCard(QWidget):
         if on is not None and amt is None:
             error(self, T("msg.required", field=T("f.imp_amount")))
             return
-        self.repo.set_impairment_event(self.pid, on, amt if on else None, self.user)
-        self._changed()
+        if self._call(self.service.set_impairment_event, self.pid, on, amt if on else None)[0]:
+            self._changed()
 
     def _add_test(self):
         if not self._can("impairment"):
             return
-        self.repo.add_impairment_test(ImpairmentTest(self.pid, self.t_date.value(), self.t_note.text().strip()),
-                                      self.user)
-        self.t_note.clear()
-        self._changed()
+        if self._call(self.service.add_impairment_test,
+                      ImpairmentTest(self.pid, self.t_date.value(), self.t_note.text().strip()))[0]:
+            self.t_note.clear()
+            self._changed()
 
     def _del_test(self):
         if not self._can("impairment"):
@@ -231,8 +244,8 @@ class ProjectCard(QWidget):
         if tid is None:
             info(self, T("msg.select_row")); return
         if confirm(self, T("msg.confirm_delete")):
-            self.repo.delete_impairment_test(tid, self.user)
-            self._changed()
+            if self._call(self.service.delete_impairment_test, tid)[0]:
+                self._changed()
 
     # ------------------------------------------------------------ Bosqichlar
     def _build_stages(self):
@@ -255,15 +268,15 @@ class ProjectCard(QWidget):
         self.t_stages = make_table([T("stage.date"), T("col.stage_from"), T("col.stage_to"), T("f.note"),
                                     T("col.who"), T("col.role"), T("col.when")], stretch=3)
         lay.addWidget(self.t_stages)
-        self._ro(self.b_stage)
+        self._perm("stage", self.b_stage)
         self.tabs.addTab(w, T("tab.stages"))
 
     def _fill_stages(self):
         self.s_current.setText(uz.STAGE[self.rec.stage])
         fill_table(self.t_stages, [[uz.fdate(e.on_date), uz.STAGE.get(e.from_stage, ""), uz.STAGE[e.to_stage],
-                                    e.note, e.actor, uz.ROLE.get(e.role, e.role), e.created_at.replace("T", " ")]
+                                    e.note, e.actor, uz.ROLE.get(e.role, e.role), clock.fmt_tashkent(e.created_at)]
                                    for e in self.repo.stage_events(self.pid)])
-        self.b_stage.setEnabled(not self.readonly and self.rec.stage != "abandoned")
+        self.b_stage.setEnabled(self.service.can(self.user, "stage") and self.rec.stage != "abandoned")
 
     def _change_stage(self):
         if not self._can("stage"):
@@ -272,14 +285,8 @@ class ProjectCard(QWidget):
         if not d.exec():
             return
         to, on, life, note = d.values()
-        try:
-            if to == "ready" and life != self.rec.useful_life_months:
-                self.rec.useful_life_months = life
-                self.repo.save_project(self.rec, self.user)
-            self.repo.change_stage(self.pid, to, on, self.user, note)
-        except (ValueError, PermissionError) as e:
-            error(self, str(e)); return
-        self._changed()
+        if self._call(self.service.change_stage, self.pid, to, on, note, life if to == "ready" else None)[0]:
+            self._changed()
 
     # ------------------------------------------------------------ Mezonlar
     def _build_criteria(self):
@@ -307,7 +314,7 @@ class ProjectCard(QWidget):
                       "qiladi; bir kunda bir nechta baho bo'lsa — oxirgi kiritilgani.")
         note.setWordWrap(True); note.setObjectName("Muted")
         lay.addWidget(note)
-        self._ro(self.b_assess)
+        self._perm("assessment", self.b_assess)
         self.tabs.addTab(w, T("tab.criteria"))
 
     def _fill_criteria(self):
@@ -348,7 +355,7 @@ class ProjectCard(QWidget):
         if not self._can("assessment"):
             return
         prev = self.asm[-1] if self.asm else None
-        d = AssessmentDialog(self.repo, self.user, self.pid, self.service.today(), prev, self)
+        d = AssessmentDialog(self.service, self.user, self.pid, self.service.today(), prev, self)
         if d.exec():
             self._changed()
 
@@ -373,7 +380,8 @@ class ProjectCard(QWidget):
                                    T("col.comment"), "IAS 38", "BHMS 11"], stretch=4)
         self.t_costs.doubleClicked.connect(lambda *_: self._edit_cost())
         lay.addWidget(self.t_costs)
-        self._ro(self.b_c_add, self.b_c_edit, self.b_c_del, self.b_c_imp)
+        self._perm("cost", self.b_c_add, self.b_c_edit, self.b_c_del)
+        self._perm("import", self.b_c_imp)
         self.tabs.addTab(w, T("tab.costs"))
 
     def _fill_costs(self):
@@ -407,11 +415,11 @@ class ProjectCard(QWidget):
             return
         d = CostDialog(self.pid, self.service.today(), parent=self)
         if d.exec():
-            self.repo.add_cost(d.record(), self.user)
-            self._changed()
+            if self._call(self.service.add_cost, d.record())[0]:
+                self._changed()
 
     def _edit_cost(self):
-        if self.readonly:
+        if not self.service.can(self.user, "cost"):      # double-click on a row: silently view-only
             return
         if not self._can("cost"):
             return
@@ -420,8 +428,8 @@ class ProjectCard(QWidget):
             info(self, T("msg.select_row")); return
         d = CostDialog(self.pid, self.service.today(), c, self)
         if d.exec():
-            self.repo.update_cost(d.record(), self.user)
-            self._changed()
+            if self._call(self.service.update_cost, d.record())[0]:
+                self._changed()
 
     def _del_cost(self):
         if not self._can("cost"):
@@ -430,8 +438,8 @@ class ProjectCard(QWidget):
         if cid is None:
             info(self, T("msg.select_row")); return
         if confirm(self, T("msg.confirm_delete")):
-            self.repo.delete_cost(cid, self.user)
-            self._changed()
+            if self._call(self.service.delete_cost, cid)[0]:
+                self._changed()
 
     def _import_costs(self):
         if not self._can("import"):
@@ -439,15 +447,17 @@ class ProjectCard(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, T("btn.import"), "", "Excel (*.xlsx)")
         if not path:
             return
-        from ..reports.excel_import import read_costs
-        records, errors = read_costs(path, self.pid)
+        ok, got = self._call(self.service.read_import, self.pid, path)
+        if not ok:
+            return
+        records, errors = got
         if errors:
             error(self, T("cost.import_errors") + ":\n" + "\n".join(errors[:30]))
             if not records or not confirm(self, T("cost.imported", n=len(records)) + "?"):
                 return
-        self.repo.add_costs(records, self.user)
-        info(self, T("cost.imported", n=len(records)))
-        self._changed()
+        if self._call(self.service.import_costs, records)[0]:
+            info(self, T("cost.imported", n=len(records)))
+            self._changed()
 
     # ------------------------------------------------------------ Qaror
     def _build_decision(self):
@@ -582,9 +592,8 @@ class ProjectCard(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, T("btn.export"), f"amortizatsiya_{self.rec.code}.xlsx",
                                               "Excel (*.xlsx)")
         if path:
-            from ..reports.excel import export_schedule
-            export_schedule([self.a], path, self.service.settings)
-            info(self, T("rep.saved", path=path))
+            if self._call(self.service.export, "schedule", path, None, None, None, [self.a])[0]:
+                info(self, T("rep.saved", path=path))
 
     # ------------------------------------------------------------ Solishtirma
     def _build_reconcile(self):

@@ -12,7 +12,8 @@ from typing import Optional
 
 from ..core import engine
 from ..core.appsettings import AppSettings
-from .permissions import PERMISSIONS, allowed
+from .. import clock
+from ..permissions import PermissionDenied, ReadOnlyRole, enforce  # noqa: F401 (re-exported)
 from .schema import migrate
 
 ROLES = ("leader", "accountant", "auditor")
@@ -32,17 +33,6 @@ class EvidenceRequired(ValueError):
     def __init__(self, keys):
         super().__init__(f"evidence required for: {', '.join(keys)}")
         self.keys = list(keys)
-
-
-class PermissionDenied(PermissionError):
-    """The user's role may not perform this action. The message is in Uzbek; the attempt is audited."""
-    def __init__(self, message: str, action: str, role: str):
-        super().__init__(message)
-        self.action, self.role = action, role
-
-
-class ReadOnlyRole(PermissionDenied):
-    """Ichki auditor: view only."""
 
 
 @dataclass(frozen=True)
@@ -189,10 +179,6 @@ def _money(v, nullable=True):
     return v
 
 
-def _now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
 def _json(v) -> Optional[str]:
     if v is None:
         return None
@@ -211,6 +197,7 @@ class Repository:
         self.conn = sqlite3.connect(self.path, isolation_level=None)   # transactions managed by _tx()
         self.conn.row_factory = sqlite3.Row
         self._depth = 0
+        self._ts = None
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.version = migrate(self.conn)
         self._seed_settings()
@@ -220,6 +207,7 @@ class Repository:
         """Nestable transaction: a change and its audit record commit together or not at all."""
         if self._depth == 0:
             self.conn.execute("BEGIN IMMEDIATE")
+            self._ts = clock.utc_iso()          # one timestamp for a change and its audit record
         self._depth += 1
         try:
             yield
@@ -232,6 +220,9 @@ class Repository:
             self._depth -= 1
             if self._depth == 0:
                 self.conn.execute("COMMIT")
+
+    def _stamp(self) -> str:
+        return self._ts if self._depth else clock.utc_iso()
 
     def close(self):
         self.conn.close()
@@ -247,21 +238,18 @@ class Repository:
         name, role = (who.name, who.role) if isinstance(who, User) else who
         self.conn.execute(
             "INSERT INTO audit_log (at, actor, role, action, entity, entity_id, before, after) VALUES (?,?,?,?,?,?,?,?)",
-            (_now(), name, role, action, entity, entity_id, _json(before), _json(after)))
+            (self._stamp(), name, role, action, entity, entity_id, _json(before), _json(after)))
 
     def authorize(self, user: User, action: str):
-        """Raises PermissionDenied (ReadOnlyRole for the auditor) if the role may not do `action`.
-        A denied attempt is written to the audit log in its own committed transaction."""
+        """Safety net for direct repository calls: the same check as the service layer (ittki.permissions)."""
         if not isinstance(user, User):
             raise TypeError("user must be a User")
-        if allowed(user.role, action):
-            return
-        from ..i18n import uz
-        msg = uz.t("perm.denied", action=uz.PERM_ACTION[action], role=uz.ROLE.get(user.role, user.role),
-                   allowed=", ".join(uz.ROLE[r] for r in sorted(PERMISSIONS[action])))
+        enforce(self, user, action)
+
+    def audit_denied(self, user: User, action: str):
+        """Record a refused attempt. Committed on its own, so a later rollback cannot erase it."""
         if self._depth == 0:
             self._audit(user, "denied", action, None, None, {"action": action, "role": user.role})
-        raise (ReadOnlyRole if user.role == "auditor" else PermissionDenied)(msg, action, user.role)
 
     def audit_log(self, entity: Optional[str] = None, entity_id: Optional[int] = None) -> list[AuditRow]:
         q, a = "SELECT * FROM audit_log", []
@@ -354,7 +342,7 @@ class Repository:
         vals = self._project_values(p)
         with self._tx():
             if p.id is None:
-                p.created_at = _now()
+                p.created_at = self._stamp()
                 cur = self.conn.execute(
                     f"INSERT INTO projects ({', '.join(vals)}, created_at) VALUES ({', '.join('?' * len(vals))}, ?)",
                     (*vals.values(), p.created_at))
@@ -417,7 +405,7 @@ class Repository:
             raise ValueError("research is the initial stage")
         with self._tx():
             self.save_project(p, user)
-            ts = _now()
+            ts = self._stamp()
             cur = self.conn.execute(
                 "INSERT INTO stage_events (project_id, from_stage, to_stage, on_date, note, actor, role, created_at) "
                 "VALUES (?,?,?,?,?,?,?,?)", (pid, frm, to_stage, _iso(on), note, user.name, user.role, ts))
@@ -444,7 +432,7 @@ class Repository:
         missing = [k for k, ans in a.answers.items() if ans.answer == "yes" and ans.evidence is None]
         if missing and not a.is_draft:
             raise EvidenceRequired(missing)
-        a.actor, a.role, a.created_at = user.name, user.role, _now()
+        a.actor, a.role, a.created_at = user.name, user.role, self._stamp()
         with self._tx():
             cur = self.conn.execute(
                 "INSERT INTO assessments (project_id, on_date, is_draft, note, actor, role, created_at) "
@@ -461,7 +449,7 @@ class Repository:
                         raise ValueError(f"{k}: evidence type and number are required")
                     ev_id = self.conn.execute(
                         "INSERT INTO evidence_documents (doc_type, number, doc_date, file_path, created_at) "
-                        "VALUES (?,?,?,?,?)", (e.doc_type, e.number, _iso(e.doc_date), e.file_path, _now())).lastrowid
+                        "VALUES (?,?,?,?,?)", (e.doc_type, e.number, _iso(e.doc_date), e.file_path, self._stamp())).lastrowid
                     e.id = ev_id
                 self.conn.execute("INSERT INTO assessment_answers (assessment_id, criterion_key, answer, evidence_id) "
                                   "VALUES (?,?,?,?)", (a.id, k, ans.answer, ev_id))
@@ -499,7 +487,7 @@ class Repository:
         with self._tx():
             c.id = self.conn.execute(
                 f"INSERT INTO costs ({', '.join(vals)}, created_at) VALUES ({', '.join('?' * len(vals))}, ?)",
-                (*vals.values(), _now())).lastrowid
+                (*vals.values(), self._stamp())).lastrowid
             self._audit(user, "create", "cost", c.id, None, vals)
         return c.id
 

@@ -10,6 +10,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDateEdit, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QLineEdit, QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
+from .. import clock
 from ..i18n import uz
 
 DATE_FMT = "dd.MM.yyyy"
@@ -28,7 +29,7 @@ class DateEdit(QDateEdit):
         super().__init__(parent)
         self.setCalendarPopup(True)
         self.setDisplayFormat(DATE_FMT)
-        self.setDate(to_qdate(value or date.today()))
+        self.setDate(to_qdate(value or clock.today()))
         self.setMinimumWidth(110)
 
     def value(self) -> date:

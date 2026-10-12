@@ -8,6 +8,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, RGBColor
 
+from .. import clock
 from ..core.appsettings import AppSettings
 from ..core.defaults import ACCOUNT_NAMES
 from ..i18n import uz
@@ -205,7 +206,7 @@ def export_note(analyses: list[Analysis], path, settings: AppSettings, start: da
                           + ", ".join(a.record.code for a in outscope) + ".")
 
     foot = doc.add_paragraph()
-    r = foot.add_run(f"Izoh {uz.APP_NAME} dasturida {datetime.now():%d.%m.%Y} sanada avtomatik tuzildi; raqamlar "
+    r = foot.add_run(f"Izoh {uz.APP_NAME} dasturida {clock.now_tashkent()} (Toshkent, UTC+5) da avtomatik tuzildi; raqamlar "
                      f"qarorlar mexanizmi hisob-kitoblaridan olingan.")
     r.italic = True
     r.font.size = Pt(9)

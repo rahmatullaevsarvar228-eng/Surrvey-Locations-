@@ -1,8 +1,8 @@
 # Результаты тест-сценариев S1–S20
 
-Сгенерировано `tools/test_results.py` 12.10.2026 05:41; Python 3.13.16, Linux. Фактические значения посчитаны движком `ittki/core/engine.py`, статус взят из прогона pytest. Базовый проект и сценарии взяты из раздела 8 ТЗ (`tests/test_engine.py`).
+Сгенерировано `tools/test_results.py` 12.10.2026 06:07; Python 3.13.16, Linux. Фактические значения посчитаны движком `ittki/core/engine.py`, статус взят из прогона pytest. Базовый проект и сценарии взяты из раздела 8 ТЗ (`tests/test_engine.py`).
 
-**pytest: 137 из 137 тестов прошли, 0 упало (13.9 с).**
+**pytest: 160 из 160 тестов прошли, 0 упало (57.8 с).**
 
 | № | Сценарий | Ожидается по ТЗ: IAS 38 | Факт: IAS 38 | Ожидается по ТЗ: BHMS 11 | Факт: BHMS 11 | pytest |
 |---|---|---|---|---|---|---|
@@ -43,6 +43,7 @@
 
 | Модуль | Тестов | Прошли |
 |---|---|---|
+| `tests/test_control_numbers.py` | 5 | 5 |
 | `tests/test_controls.py` | 17 | 17 |
 | `tests/test_db.py` | 21 | 21 |
 | `tests/test_demo.py` | 2 | 2 |
@@ -51,7 +52,7 @@
 | `tests/test_invariants.py` | 1 | 1 |
 | `tests/test_journal.py` | 15 | 15 |
 | `tests/test_performance.py` | 1 | 1 |
-| `tests/test_permissions.py` | 39 | 39 |
+| `tests/test_permissions.py` | 57 | 57 |
 | `tests/test_reports.py` | 10 | 10 |
 | `tests/test_ui.py` | 7 | 7 |
-| **Итого** | **137** | **137** |
+| **Итого** | **160** | **160** |
