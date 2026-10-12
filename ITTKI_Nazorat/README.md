@@ -130,6 +130,7 @@ python tools\test_results.py     :: docs\test_results.md (сценарии S1–
 
 * [`docs/algorithm.md`](docs/algorithm.md): блок-схема движка (Mermaid) и таблица K1–K7 ↔ IAS 38 ↔ BHMS 11;
 * [`docs/test_results.md`](docs/test_results.md): результаты сценариев;
+* [`docs/Instruktsiya_ITTKI_Nazorat.pdf`](docs/Instruktsiya_ITTKI_Nazorat.pdf): инструкция пользователя на русском (собирается `python tools\manual.py`);
 * [`docs/doubts.md`](docs/doubts.md): места, где трактовка ТЗ требует решения автора или научного руководителя.
 
 ## Ограничения v1 (из ТЗ, раздел 10)
