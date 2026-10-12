@@ -110,11 +110,6 @@ def scenario(name: str):
     return _cache(f"{name}.json")
 
 
-@app.get("/api/investment")
-def investment():
-    return _cache("investment.json")
-
-
 @app.get("/api/razyezd")
 def razyezd():
     return _cache("razyezd.json")

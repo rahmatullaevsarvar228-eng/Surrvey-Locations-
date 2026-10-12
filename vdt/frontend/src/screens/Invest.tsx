@@ -14,16 +14,18 @@ import { useT } from '../i18n'
 
 export default function Invest() {
   const t = useT()
-  const [sc, setSc] = useState<PresetName>('oddiy')
+  const [sc, setSc] = useState<PresetName>('avariya')
   const [err, setErr] = useState<string | null>(null)
   const [sid, setSid] = useState<SidingData | null>(null)
   const [base, setBase] = useState<ScenarioData | null>(null)
+  const [odd, setOdd] = useState<ScenarioData | null>(null)
   const [vi, setVi] = useState(0)
   const [len, setLen] = useState<number | null>(DEFAULTS.sidingKm)
   const [perKm, setPerKm] = useState<number | null>(DEFAULTS.trackPerKm)
   const [sw, setSw] = useState<number | null>(DEFAULTS.switchesSignals)
   const [idle, setIdle] = useState<number | null>(DEFAULTS.idlePerHour)
-  useEffect(() => { loadSiding().then(setSid).catch(e => setErr(String(e))) }, [])
+  const [inc, setInc] = useState<number | null>(null)
+  useEffect(() => { loadSiding().then(setSid).catch(e => setErr(String(e))); loadScenario('oddiy').then(setOdd) }, [])
   useEffect(() => { setBase(null); setVi(0); loadScenario(sc).then(setBase) }, [sc])
   const d = sid?.ssenariylar[sc as 'oddiy' | 'avariya'] ?? null
 
@@ -49,17 +51,21 @@ export default function Invest() {
     return { data, layout }
   }, [d, t])
 
-  const range = useMemo<[number, number]>(() => [0, 720], [])
+  const range = useMemo<[number, number]>(() => (sc === 'avariya' ? [170, 600] : [0, 720]), [sc])
   const p = usePlayer(range)
 
   if (!sid) return <Loading error={err ? t('siding_missing') : null} />
   const picker = <div className="toolbar"><PresetPicker value={sc} onChange={setSc} options={['oddiy', 'avariya']} /></div>
   if (!d) return <>{picker}<Loading error={t('siding_missing')} /></>
-  const v = d.variantlar[vi]
+  const vars = d.variantlar.filter(x => x.tejaldi_daq > 0)
+  const v = vars[vi] ?? vars[0]
+  const sig = d.reyting.filter(r => r.sezilarli).map(r => r.bekat)
   const total = len != null && perKm != null && sw != null ? len * perKm + sw : null
   const savedDay = v ? v.tejaldi_daq : 0
-  const perYear = idle != null ? (savedDay / 60) * idle * DEFAULTS.daysPerYear : null
-  const fm = base?.fifo.metrics, am = base?.ai.umumiy?.metrics
+  const isIncident = sc === 'avariya'
+  const perEvent = idle != null ? (savedDay / 60) * idle : null
+  const perYear = perEvent == null ? null : isIncident ? (inc != null ? perEvent * inc : null) : perEvent * DEFAULTS.daysPerYear
+  const fm = odd?.fifo.metrics, am = odd?.ai.umumiy?.metrics
   const softDay = fm && am ? fm.umumiy_kechikish_daq - am.umumiy_kechikish_daq : null
   const softYear = softDay != null && idle != null ? (softDay / 60) * idle * DEFAULTS.daysPerYear : null
   const st = base?.scenario.stations
@@ -72,7 +78,8 @@ export default function Invest() {
       {picker}
       <div className="card">
         <h3>{t('invest_title')}</h3>
-        <div className="message">{t('invest_msg')}</div>
+        <div className="message">{t('invest_msg2')}</div>
+        <div className={sig.length ? 'box-note' : 'warn'}>{sig.length ? t('effect_msg', { s: sig.join(', ') }) : t('no_effect_msg')}</div>
         {d.reyting.length < 10 && <div className="warn">{t('invest_partial')} ({d.reyting.length}/10)</div>}
         {plot && <Plot data={plot.data} layout={plot.layout} height={340} />}
         <div className="legend-row">
@@ -85,7 +92,7 @@ export default function Invest() {
       <div className="card">
         <div className="stview-bar">
           <h3>{t('before_after')}</h3>
-          {d.variantlar.map((x, i) => (
+          {vars.map((x, i) => (
             <button key={x.bekat} className={`btn chip ${vi === i ? 'on' : ''}`} onClick={() => setVi(i)}>{x.bekat}</button>
           ))}
         </div>
@@ -105,11 +112,11 @@ export default function Invest() {
               <div className="kpi ai"><div className="kpi-label">{t('m_total')} · {t('with_new')}</div>
                 <div className="kpi-val ai-c">{v.metrics.umumiy_kechikish_daq} {t('min')}</div>
                 <Badge errors={v.xatolar} /></div>
-              <div className="kpi"><div className="kpi-label">{t('saved_day')}</div>
+              <div className="kpi"><div className="kpi-label">{sc === 'avariya' ? t('saved_event_min') : t('saved_day')}</div>
                 <div className="kpi-val">{v.tejaldi_daq} {t('min')}</div></div>
             </div>
           </>
-        ) : <p className="muted">{t('siding_missing')}</p>}
+        ) : <p className="muted">{vars.length ? t('loading') : t('no_effect_msg')}</p>}
       </div>
 
       <div className="card">
@@ -120,6 +127,7 @@ export default function Invest() {
           <NumInput label={t('cost_km')} value={perKm} onChange={setPerKm} note={t('cost_km_note')} />
           <NumInput label={t('cost_sw')} value={sw} onChange={setSw} note={t('cost_sw_note')} />
           <NumInput label={t('idle_cost')} value={idle} onChange={setIdle} note={t('idle_note')} />
+          {isIncident && <NumInput label={t('incidents_year')} value={inc} onChange={setInc} note={t('incidents_note')} step={1} />}
         </div>
         <div className="formula">
           <b>{t('cost_total')}:</b>
@@ -128,11 +136,14 @@ export default function Invest() {
         </div>
         <div className="kpis">
           <div className="kpi"><div className="kpi-label">{t('cost_total')}</div><div className="kpi-val">{total != null ? fmtMoney(total) : '—'}</div></div>
+          {isIncident && <div className="kpi"><div className="kpi-label">{t('saved_event')} ({t('saved_this')}{v ? ` ${v.bekat}` : ''})</div>
+            <div className="kpi-val">{perEvent != null ? fmtMoney(perEvent) : '—'}</div>
+            <div className="small muted">{savedDay} {t('min')} ÷ 60 × {idle ?? '?'} $</div></div>}
           <div className="kpi"><div className="kpi-label">{t('saved_year')} ({t('saved_this')}{v ? ` ${v.bekat}` : ''})</div>
             <div className="kpi-val">{perYear != null ? fmtMoney(perYear) : '—'}</div>
-            <div className="small muted">{savedDay} {t('min')} ÷ 60 × {idle ?? '?'} $ × {DEFAULTS.daysPerYear}</div></div>
+            <div className="small muted">{savedDay} {t('min')} ÷ 60 × {idle ?? '?'} $ × {isIncident ? (inc ?? '?') : DEFAULTS.daysPerYear}</div></div>
           <div className="kpi"><div className="kpi-label">{t('payback_years')}</div>
-            <div className="kpi-val">{total != null && perYear ? `${(total / perYear).toFixed(0)} ${t('years')}` : '—'}</div></div>
+            <div className="kpi-val">{total != null && perYear ? `${Math.round(total / perYear).toLocaleString('ru-RU')} ${t('years')}` : '—'}</div></div>
         </div>
         {softDay != null && softYear != null && (
           <div className="box-note">{t('compare_software', { m: softDay, d: fmtMoney(softYear) })}</div>

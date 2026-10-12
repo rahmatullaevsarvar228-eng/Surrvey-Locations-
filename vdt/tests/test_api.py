@@ -32,3 +32,9 @@ def test_breakdown_and_verify():
 def test_bad_input():
     assert c.post("/api/solve", json=dict(disruption=dict(segment=[1, 5], start=0, end=10))).status_code == 400
     assert c.post("/api/solve", json=dict(time_limit=100)).status_code == 422
+
+
+def test_cache_endpoints():
+    assert c.get("/api/scenarios/oddiy").status_code == 200
+    r = c.get("/api/razyezd")
+    assert r.status_code == 200 and "ssenariylar" in r.json()

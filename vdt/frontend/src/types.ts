@@ -35,12 +35,6 @@ export interface ScenarioData {
   tiklanish?: { fifo: number | null; ai: Partial<Record<Objective, number | null>> }
   tez_hisob?: { soniya: number; status: string; umumiy_kechikish: number; xatolar: number }
 }
-export interface InvestmentRow { bekat: string; yollar?: number; tejaldi_daq: number; sezilarli: boolean }
-export interface InvestmentData {
-  tugallangan: boolean; reyting: InvestmentRow[]
-  asosiy_qiymat?: number; boshlangich_qiymat?: number; shovqin_chegarasi?: number
-  hisob_daqiqa?: number; protokol?: { asosiy_hisob_s: number; variant_hisob_s: number; seedlar: number[] }
-}
 export interface SidingVariant {
   bekat: string; indeks: number; yollar_oldin: number; yollar_keyin: number
   qiymat: number; tejaldi_daq: number; schedule: Schedule; metrics: Metrics; xatolar: string[]

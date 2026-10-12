@@ -152,6 +152,14 @@ const uz = {
   trains_note: 'modeldagi kunlik poyezdlar soni',
   track_note: '1 km narxi × uchastka uzunligi',
   saved_this: 'shu bekatda +1 yo‘l',
+  incidents_year: 'Yiliga shunday hodisalar soni',
+  incidents_note: 'uchastka statistikasidan kiriting',
+  saved_event: 'Bitta hodisada tejash',
+  track_vs_ai: 'AI ikkinchi yo‘lning o‘rnini bosmaydi: u qurilishsiz, mavjud relslardan ko‘proq foyda oladi. Qurilish qarorini shu raqamlar bilan solishtiring.',
+  saved_event_min: 'Bitta hodisada tejash, daq',
+  no_effect_msg: 'Bu ssenariyda +1 yo‘l hech bir bekatda sezilarli foyda bermaydi: AI mavjud yo‘llardan to‘liq foydalanadi. Avval jadvalni optimallashtiring, keyin quring.',
+  effect_msg: 'Sezilarli samara faqat {s} bekatlarida — yopiq peregon yonida. Qolgan bekatlarda +1 yo‘l foyda bermaydi.',
+  invest_msg2: 'Joy muhim: pulni qurilishga sarflashdan oldin modelda tekshiring.',
 }
 
 type Dict = typeof uz
@@ -306,6 +314,14 @@ const ru: Dict = {
   trains_note: 'число поездов в сутки в модели',
   track_note: 'стоимость 1 км × длина участка',
   saved_this: '+1 путь на этой станции',
+  incidents_year: 'Таких событий в год',
+  incidents_note: 'введите из статистики участка',
+  saved_event: 'Экономия за одно событие',
+  track_vs_ai: 'ИИ не заменяет второй путь: он без стройки выжимает больше из существующих рельсов. Сравнивайте решение о стройке с этими цифрами.',
+  saved_event_min: 'Экономия за одно событие, мин',
+  no_effect_msg: 'В этом сценарии +1 путь не даёт заметного эффекта ни на одной станции: ИИ полностью использует существующие пути. Сначала оптимизируйте график, потом стройте.',
+  effect_msg: 'Заметный эффект только на станциях {s} — рядом с закрытым перегоном. На остальных станциях +1 путь не помогает.',
+  invest_msg2: 'Место важно: прежде чем тратить деньги на стройку, проверьте в модели.',
 }
 
 const en: Dict = {
@@ -458,6 +474,14 @@ const en: Dict = {
   trains_note: 'trains per day in the model',
   track_note: 'cost per km × section length',
   saved_this: '+1 track at this station',
+  incidents_year: 'Such incidents per year',
+  incidents_note: 'enter from the section statistics',
+  saved_event: 'Saving per incident',
+  track_vs_ai: 'The AI does not replace a second track: it gets more out of existing rails without construction. Weigh the construction decision against these figures.',
+  saved_event_min: 'Saving per incident, min',
+  no_effect_msg: 'In this scenario +1 track gives no significant benefit at any station: the AI already uses the existing tracks fully. Optimise the timetable first, then build.',
+  effect_msg: 'A significant effect only at {s} — next to the closed section. At other stations +1 track does not help.',
+  invest_msg2: 'Location matters: check in the model before spending money on construction.',
 }
 
 export type TKey = keyof Dict

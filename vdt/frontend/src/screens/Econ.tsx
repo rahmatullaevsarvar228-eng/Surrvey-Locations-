@@ -67,8 +67,9 @@ export default function Econ() {
           <div className="kpis">
             <div className="kpi ai"><div className="kpi-label">{t('result_year')}</div>
               <div className="kpi-val">{fmtMoney(year)}</div></div>
-            {track != null && year > 0 && <div className="kpi"><div className="kpi-label">{t('payback')}</div>
-              <div className="kpi-val">{(track / year).toFixed(1)} {t('years')}</div></div>}
+            {track != null && <div className="kpi"><div className="kpi-label">{t('track_cost')}</div>
+              <div className="kpi-val">{fmtMoney(track)}</div>
+              <div className="small muted">{t('track_vs_ai')}</div></div>}
           </div>
         ) : <p className="muted">{t('fill_fields')}</p>}
       </div>
