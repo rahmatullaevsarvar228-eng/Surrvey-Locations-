@@ -115,6 +115,11 @@ def investment():
     return _cache("investment.json")
 
 
+@app.get("/api/razyezd")
+def razyezd():
+    return _cache("razyezd.json")
+
+
 @app.post("/api/simulate_fifo")
 def api_fifo(req: SolveReq):
     st, tr, dis = _build(req)

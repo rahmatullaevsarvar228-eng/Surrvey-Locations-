@@ -1,4 +1,4 @@
-import type { InvestmentData, ScenarioData } from './types'
+import type { InvestmentData, ScenarioData, SidingData } from './types'
 
 export type PresetName = 'oddiy' | 'avariya' | 'osish30'
 export const PRESETS: PresetName[] = ['oddiy', 'avariya', 'osish30']
@@ -26,6 +26,10 @@ export function loadScenario(name: PresetName): Promise<ScenarioData> {
 
 export function loadInvestment(): Promise<InvestmentData> {
   return getJson<InvestmentData>('api/investment', 'cache/investment.json')
+}
+
+export function loadSiding(): Promise<SidingData> {
+  return getJson<SidingData>('api/razyezd', 'cache/razyezd.json')
 }
 
 export async function solve(body: unknown): Promise<ScenarioData> {

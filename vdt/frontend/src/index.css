@@ -110,3 +110,30 @@ footer { text-align: center; padding: 16px; font-size: .9em; border-top: 1px sol
 .st-cell { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: .88em; }
 .scroll-x { overflow-x: auto; }
 @media (max-width: 640px) { main { padding: 12px 16px; } header { padding: 10px 16px; } }
+
+.st-label.pick { cursor: pointer; text-decoration: underline dotted; }
+.st-label.sel { fill: var(--accent); font-weight: 800; }
+.stview-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.stview-bar h3 { margin: 0; }
+.stview-bar select { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid #c9ced6; }
+.stview { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.stview-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.stview-svg { width: 100%; height: auto; display: block; border-radius: 10px; }
+.sv-dim { font-size: 11px; fill: #9fb3a6; }
+.sv-title { font-size: 14px; font-weight: 800; fill: #e8f0ea; letter-spacing: .5px; }
+.sv-clock { font-size: 12px; font-family: monospace; fill: #9fb3a6; }
+.sv-train { font-size: 10px; font-weight: 700; fill: #fff; }
+.sv-wait { font-size: 10px; fill: #ffd27a; font-weight: 600; }
+.sv-stuck { font-size: 10px; fill: #ff8a80; font-weight: 800; }
+.sv-closed { font-size: 12px; fill: #ff8a80; font-weight: 700; }
+.stview-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.sig { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }
+.sig.g { background: #3ddc84; } .sig.r { background: #ff5a4f; }
+.trk-new { display: inline-block; width: 26px; border-top: 3px dashed #f59f00; vertical-align: middle; }
+.num-input .note { font-weight: 400; color: var(--muted); font-size: .85em; }
+.est { display: inline-block; font-size: .72em; font-weight: 700; background: #fff4e6; color: #a35a00; border: 1px solid #ffc078; border-radius: 8px; padding: 0 6px; margin-left: 6px; vertical-align: middle; }
+.cost-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.src-list { font-size: .85em; color: var(--muted); padding-left: 18px; }
+.src-list a { color: var(--accent); }
+.box-note { background: #eaf6ef; border-left: 3px solid var(--ai); padding: 8px 12px; border-radius: 6px; margin: 10px 0 4px; font-weight: 600; }
+details summary { cursor: pointer; color: var(--accent); margin-top: 6px; }

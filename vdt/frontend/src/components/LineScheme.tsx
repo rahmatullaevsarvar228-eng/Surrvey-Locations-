@@ -44,9 +44,10 @@ export function waitedSoFar(trains: Train[], sched: Schedule, t: number): number
 
 interface Lane { label: string; color: string; schedule: Schedule; counter?: number }
 
-export default function LineScheme({ stations, trains, lanes, t, disruption, showTracks = true }: {
+export default function LineScheme({ stations, trains, lanes, t, disruption, showTracks = true, selected, onPickStation }: {
   stations: Station[]; trains: Train[]; lanes: Lane[]; t: number
   disruption?: Disruption | null; showTracks?: boolean
+  selected?: number; onPickStation?: (i: number) => void
 }) {
   const tr = useT()
   const maxKm = stations[stations.length - 1].km
@@ -82,7 +83,9 @@ export default function LineScheme({ stations, trains, lanes, t, disruption, sho
                       fill="none" stroke="#999" strokeWidth={1.5} />
                   ))}
                   <rect x={x - 3} y={y0 - 4} width={6} height={8} fill={term ? '#222' : '#fff'} stroke="#222" />
-                  <text x={x} y={y0 + 42} textAnchor="middle" className="st-label">{s.name}</text>
+                  <text x={x} y={y0 + 42} textAnchor="middle"
+                    className={`st-label ${onPickStation && !term ? 'pick' : ''} ${selected === i ? 'sel' : ''}`}
+                    onClick={onPickStation && !term ? () => onPickStation(i) : undefined}>{s.name}</text>
                 </g>
               )
             })}

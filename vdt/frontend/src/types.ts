@@ -41,3 +41,14 @@ export interface InvestmentData {
   asosiy_qiymat?: number; boshlangich_qiymat?: number; shovqin_chegarasi?: number
   hisob_daqiqa?: number; protokol?: { asosiy_hisob_s: number; variant_hisob_s: number; seedlar: number[] }
 }
+export interface SidingVariant {
+  bekat: string; indeks: number; yollar_oldin: number; yollar_keyin: number
+  qiymat: number; tejaldi_daq: number; schedule: Schedule; metrics: Metrics; xatolar: string[]
+}
+export interface SidingRank { bekat: string; indeks: number; yollar: number; tejaldi_daq: number; sezilarli: boolean; xatolar: number }
+export interface SidingScenario {
+  boshlangich: number; shovqin: number
+  nazorat: { qiymat: number; schedule: Schedule; metrics: Metrics; xatolar: string[] }
+  reyting: SidingRank[]; variantlar: SidingVariant[]
+}
+export interface SidingData { hisob_s: number; seedlar: number[]; ssenariylar: Partial<Record<'oddiy' | 'avariya', SidingScenario>> }

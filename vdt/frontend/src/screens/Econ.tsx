@@ -4,16 +4,23 @@ import type { Objective, ScenarioData } from '../types'
 import NumInput, { fmtMoney } from '../components/NumInput'
 import { Loading, ObjectivePicker, PresetPicker } from '../components/Common'
 import { useT } from '../i18n'
+import { DEFAULTS } from '../costs'
 
 export default function Econ() {
   const t = useT()
   const [preset, setPreset] = useState<PresetName>('oddiy')
   const [obj, setObj] = useState<Objective>('umumiy')
   const [d, setD] = useState<ScenarioData | null>(null)
-  const [cost, setCost] = useState<number | null>(null)
-  const [perDay, setPerDay] = useState<number | null>(null)
-  const [days, setDays] = useState<number | null>(null)
+  const [cost, setCost] = useState<number | null>(DEFAULTS.idlePerHour)
+  const [perDay, setPerDay] = useState<number | null>(18)
+  const [days, setDays] = useState<number | null>(DEFAULTS.daysPerYear)
   const [track, setTrack] = useState<number | null>(null)
+  useEffect(() => {
+    if (d && track == null) {
+      const len = d.scenario.stations[d.scenario.stations.length - 1].km
+      setTrack(Math.round(len * DEFAULTS.trackPerKm / 1e6) * 1e6)
+    }
+  }, [d, track])
   useEffect(() => { setD(null); loadScenario(preset).then(setD) }, [preset])
   if (!d) return <Loading />
   const fm = d.fifo.metrics, am = d.ai[obj]?.metrics
@@ -41,12 +48,12 @@ export default function Econ() {
         ) : <p className="muted">—</p>}
       </div>
       <div className="card">
-        <div className="warn soft">{t('econ_warn')}</div>
+        <div className="warn soft">{t('default_note')}</div>
         <div className="inputs">
-          <NumInput label={t('idle_cost')} value={cost} onChange={setCost} />
-          <NumInput label={t('trains_day')} value={perDay} onChange={setPerDay} />
+          <NumInput label={t('idle_cost')} value={cost} onChange={setCost} note={t('idle_note')} />
+          <NumInput label={t('trains_day')} value={perDay} onChange={setPerDay} note={t('trains_note')} />
           <NumInput label={t('days_year')} value={days} onChange={setDays} />
-          <NumInput label={t('track_cost')} value={track} onChange={setTrack} />
+          <NumInput label={t('track_cost')} value={track} onChange={setTrack} note={`${t('track_note')} (${fmtMoney(DEFAULTS.trackPerKm)}/km)`} />
         </div>
         <div className="formula">
           <b>{t('formula')}:</b> {t('formula_text')}
@@ -55,6 +62,7 @@ export default function Econ() {
             {' = '}<b>{year != null ? fmtMoney(year) : '?'}</b>
           </div>
         </div>
+        <p className="muted small">{t('only_delay_note')}</p>
         {year != null ? (
           <div className="kpis">
             <div className="kpi ai"><div className="kpi-label">{t('result_year')}</div>

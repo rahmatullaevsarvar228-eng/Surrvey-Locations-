@@ -39,7 +39,8 @@ def optimise(st, trains, disruption=None, objective="umumiy", headway=HEADWAY,
     return ok, sched, status
 
 
-def _solve_cp(st, trains, disruption, objective, headway, horizon, time_limit, workers, seed, hint):
+def _solve_cp(st, trains, disruption, objective, headway, horizon, time_limit, workers, seed, hint,
+              repair_hint=False):
     n = len(st)
     m = cp_model.CpModel()
     A, D = {}, {}
@@ -88,6 +89,8 @@ def _solve_cp(st, trains, disruption, objective, headway, horizon, time_limit, w
     solver.parameters.max_time_in_seconds = time_limit
     solver.parameters.num_workers = workers
     solver.parameters.random_seed = seed
+    if repair_hint and hint is not None:
+        solver.parameters.repair_hint = True
     res = solver.Solve(m)
     if res not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return False, None, solver.StatusName(res)
