@@ -81,7 +81,8 @@ class MoneyEdit(QLineEdit):
         super().__init__(parent)
         self.allow_empty = allow_empty
         self.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.setPlaceholderText("0")
+        if not allow_empty:
+            self.setPlaceholderText("0")      # an optional field left empty stays visibly empty, not "0"
         self.editingFinished.connect(self._reformat)
         self.setValue(value)
 
@@ -227,3 +228,15 @@ def choose(parent, text: str, options: list[str]) -> int:
     """Index of the chosen option, -1 if closed."""
     return _box(parent, QMessageBox.Warning, uz.t("msg.confirm"), text,
                 [(o, QMessageBox.ActionRole) for o in options])
+
+
+def can(parent, repo, user, action: str) -> bool:
+    """Permission check before an action: on refusal shows the Uzbek message (the repository has
+    already written the attempt to the audit log)."""
+    from ..db.repository import PermissionDenied
+    try:
+        repo.authorize(user, action)
+        return True
+    except PermissionDenied as e:
+        error(parent, str(e))
+        return False

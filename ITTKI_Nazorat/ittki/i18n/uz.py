@@ -61,6 +61,17 @@ ROLE = {"leader": "Loyiha rahbari", "accountant": "Buxgalter", "auditor": "Ichki
 LEVEL = {"high": "Yuqori", "medium": "O'rta", "info": "Ma'lumot"}
 PROJECT_STATUS = {"active": "Faol", "ready": "Foydalanishga tayyor", "abandoned": "To'xtatilgan"}
 
+PERM_ACTION = {
+    "project": "loyiha ma'lumotlarini saqlash",
+    "stage": "bosqichni o'zgartirish",
+    "assessment": "mezonlar bahosini saqlash",
+    "cost": "xarajatlarni kiritish, tahrirlash va o'chirish",
+    "import": "xarajatlarni Exceldan import qilish",
+    "impairment": "qadrsizlanish hodisasi va testlarini kiritish",
+    "settings": "sozlamalarni saqlash",
+    "report": "hisobotlarni tuzish",
+}
+
 JOURNAL_OPS = {
     "expense": "Xarajat sifatida tan olindi",
     "capitalize": "Kapitallashtirildi",
@@ -116,6 +127,8 @@ UI = {
     "user.prompt": "Ishni boshlash uchun F.I.Sh. va rolingizni kiriting",
     "user.change": "Foydalanuvchini almashtirish",
     "user.readonly": "Ichki auditor faqat ko'rish huquqiga ega",
+    "perm.denied": "Ruxsat yo'q: «{action}» amalini faqat {allowed} bajara oladi.\nSizning rolingiz: {role}.\n"
+                   "Urinish audit jurnaliga yozildi.",
     # home
     "home.title": "Umumiy ko'rsatkichlar",
     "home.projects": "Loyihalar",

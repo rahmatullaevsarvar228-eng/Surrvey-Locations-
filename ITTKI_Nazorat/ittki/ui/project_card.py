@@ -17,7 +17,7 @@ from ..i18n import uz
 from ..services import Analysis, Service, cost_rows
 from . import style
 from .dialogs import AssessmentDialog, CostDialog, StageDialog, combo
-from .widgets import (Cell, DateEdit, MoneyEdit, OptionalDate, badge, confirm, error, fill_table, info, make_table,
+from .widgets import (Cell, can, DateEdit, MoneyEdit, OptionalDate, badge, confirm, error, fill_table, info, make_table,
                       money_cell, selected_data, wrap_rows)
 
 T = uz.t
@@ -69,6 +69,9 @@ class ProjectCard(QWidget):
         self.refresh()
         if self.on_change:
             self.on_change()
+
+    def _can(self, action: str) -> bool:
+        return can(self, self.repo, self.user, action)
 
     def _ro(self, *widgets):
         for w in widgets:
@@ -176,6 +179,8 @@ class ProjectCard(QWidget):
                                   for t in self.repo.impairment_tests(self.pid)])
 
     def _save_info(self):
+        if not self._can("project"):
+            return
         p = self.rec
         try:
             p.budget = self.f_budget.value()
@@ -198,6 +203,8 @@ class ProjectCard(QWidget):
         self._changed()
 
     def _save_impairment(self):
+        if not self._can("impairment"):
+            return
         on = self.i_date.value()
         try:
             amt = self.i_amount.value()
@@ -210,12 +217,16 @@ class ProjectCard(QWidget):
         self._changed()
 
     def _add_test(self):
+        if not self._can("impairment"):
+            return
         self.repo.add_impairment_test(ImpairmentTest(self.pid, self.t_date.value(), self.t_note.text().strip()),
                                       self.user)
         self.t_note.clear()
         self._changed()
 
     def _del_test(self):
+        if not self._can("impairment"):
+            return
         tid = selected_data(self.t_tests)
         if tid is None:
             info(self, T("msg.select_row")); return
@@ -255,6 +266,8 @@ class ProjectCard(QWidget):
         self.b_stage.setEnabled(not self.readonly and self.rec.stage != "abandoned")
 
     def _change_stage(self):
+        if not self._can("stage"):
+            return
         d = StageDialog(self.rec, self.service.today(), self)
         if not d.exec():
             return
@@ -332,6 +345,8 @@ class ProjectCard(QWidget):
         fill_table(self.t_ans, rows)
 
     def _new_assessment(self):
+        if not self._can("assessment"):
+            return
         prev = self.asm[-1] if self.asm else None
         d = AssessmentDialog(self.repo, self.user, self.pid, self.service.today(), prev, self)
         if d.exec():
@@ -388,6 +403,8 @@ class ProjectCard(QWidget):
         return next((c for c in self.costs if c.id == cid), None)
 
     def _add_cost(self):
+        if not self._can("cost"):
+            return
         d = CostDialog(self.pid, self.service.today(), parent=self)
         if d.exec():
             self.repo.add_cost(d.record(), self.user)
@@ -395,6 +412,8 @@ class ProjectCard(QWidget):
 
     def _edit_cost(self):
         if self.readonly:
+            return
+        if not self._can("cost"):
             return
         c = self._cost_by_id(selected_data(self.t_costs))
         if c is None:
@@ -405,6 +424,8 @@ class ProjectCard(QWidget):
             self._changed()
 
     def _del_cost(self):
+        if not self._can("cost"):
+            return
         cid = selected_data(self.t_costs)
         if cid is None:
             info(self, T("msg.select_row")); return
@@ -413,6 +434,8 @@ class ProjectCard(QWidget):
             self._changed()
 
     def _import_costs(self):
+        if not self._can("import"):
+            return
         path, _ = QFileDialog.getOpenFileName(self, T("btn.import"), "", "Excel (*.xlsx)")
         if not path:
             return
@@ -554,6 +577,8 @@ class ProjectCard(QWidget):
             self.am_info.setText("  " + T("amort.empty"))
 
     def _export_amort(self):
+        if not self._can("report"):
+            return
         path, _ = QFileDialog.getSaveFileName(self, T("btn.export"), f"amortizatsiya_{self.rec.code}.xlsx",
                                               "Excel (*.xlsx)")
         if path:

@@ -12,6 +12,7 @@ from typing import Optional
 
 from ..core import engine
 from ..core.appsettings import AppSettings
+from .permissions import PERMISSIONS, allowed
 from .schema import migrate
 
 ROLES = ("leader", "accountant", "auditor")
@@ -33,8 +34,15 @@ class EvidenceRequired(ValueError):
         self.keys = list(keys)
 
 
-class ReadOnlyRole(PermissionError):
-    pass
+class PermissionDenied(PermissionError):
+    """The user's role may not perform this action. The message is in Uzbek; the attempt is audited."""
+    def __init__(self, message: str, action: str, role: str):
+        super().__init__(message)
+        self.action, self.role = action, role
+
+
+class ReadOnlyRole(PermissionDenied):
+    """Ichki auditor: view only."""
 
 
 @dataclass(frozen=True)
@@ -241,12 +249,19 @@ class Repository:
             "INSERT INTO audit_log (at, actor, role, action, entity, entity_id, before, after) VALUES (?,?,?,?,?,?,?,?)",
             (_now(), name, role, action, entity, entity_id, _json(before), _json(after)))
 
-    @staticmethod
-    def _writable(user: User):
+    def authorize(self, user: User, action: str):
+        """Raises PermissionDenied (ReadOnlyRole for the auditor) if the role may not do `action`.
+        A denied attempt is written to the audit log in its own committed transaction."""
         if not isinstance(user, User):
             raise TypeError("user must be a User")
-        if user.role == "auditor":
-            raise ReadOnlyRole("auditor role is read-only")
+        if allowed(user.role, action):
+            return
+        from ..i18n import uz
+        msg = uz.t("perm.denied", action=uz.PERM_ACTION[action], role=uz.ROLE.get(user.role, user.role),
+                   allowed=", ".join(uz.ROLE[r] for r in sorted(PERMISSIONS[action])))
+        if self._depth == 0:
+            self._audit(user, "denied", action, None, None, {"action": action, "role": user.role})
+        raise (ReadOnlyRole if user.role == "auditor" else PermissionDenied)(msg, action, user.role)
 
     def audit_log(self, entity: Optional[str] = None, entity_id: Optional[int] = None) -> list[AuditRow]:
         q, a = "SELECT * FROM audit_log", []
@@ -263,22 +278,46 @@ class Repository:
                          json.loads(r["after"]) if r["after"] else None) for r in rows]
 
     # ---- settings (M12) ----------------------------------------------
+    SETTINGS_VERSION = 2   # 2: E9 default threshold 0 -> 1 000 000 so'm
+
     def _seed_settings(self):
         if self.conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0]:
+            self._upgrade_settings()
             return
         flat = AppSettings().to_flat()
         with self._tx():
             for k, v in flat.items():
                 self.conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (k, _json(v)))
+            self.conn.execute("INSERT INTO settings (key, value) VALUES ('meta.settings_version', ?)",
+                              (_json(self.SETTINGS_VERSION),))
             self._audit(SYSTEM_USER, "create", "settings", None, None, flat)
 
+    def _upgrade_settings(self):
+        """Databases created before settings version 2 had E9 = 0 by default. Replace it with the new default
+        unless a user changed it explicitly (that would be in the audit log)."""
+        row = self.conn.execute("SELECT value FROM settings WHERE key = 'meta.settings_version'").fetchone()
+        if row and json.loads(row["value"]) >= self.SETTINGS_VERSION:
+            return
+        with self._tx():
+            cur = self.conn.execute("SELECT value FROM settings WHERE key = 'control.e9_amount'").fetchone()
+            user_set = any(x.after and "control.e9_amount" in x.after and x.role != SYSTEM_USER[1]
+                           for x in self.audit_log("settings"))
+            if cur is not None and json.loads(cur["value"]) == 0 and not user_set:
+                new = AppSettings().controls.e9_amount
+                self.conn.execute("UPDATE settings SET value = ? WHERE key = 'control.e9_amount'", (_json(new),))
+                self._audit(SYSTEM_USER, "update", "settings", None, {"control.e9_amount": 0},
+                            {"control.e9_amount": new})
+            self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('meta.settings_version', ?)",
+                              (_json(self.SETTINGS_VERSION),))
+
     def settings(self) -> AppSettings:
-        flat = {r["key"]: json.loads(r["value"]) for r in self.conn.execute("SELECT key, value FROM settings")}
+        flat = {r["key"]: json.loads(r["value"]) for r in self.conn.execute("SELECT key, value FROM settings")
+                if not r["key"].startswith("meta.")}
         return AppSettings.from_flat(flat)
 
     def save_settings(self, new: AppSettings, user: User) -> list[str]:
         """Validates (constructing AppSettings does), writes changed keys, audits each. Returns changed keys."""
-        self._writable(user)
+        self.authorize(user, "settings")
         new = AppSettings.from_flat(new.to_flat())     # re-validate
         old = self.settings().to_flat()
         changed = []
@@ -311,7 +350,7 @@ class Repository:
                 "is_demo": int(bool(p.is_demo))}
 
     def save_project(self, p: ProjectRecord, user: User) -> int:
-        self._writable(user)
+        self.authorize(user, "project")
         vals = self._project_values(p)
         with self._tx():
             if p.id is None:
@@ -360,7 +399,7 @@ class Repository:
 
     # ---- stages (M2) -------------------------------------------------
     def change_stage(self, pid: int, to_stage: str, on: date, user: User, note: str = "") -> ProjectRecord:
-        self._writable(user)
+        self.authorize(user, "stage")
         p = self.project(pid)
         frm = p.stage
         if to_stage not in STAGES:
@@ -394,7 +433,7 @@ class Repository:
     # ---- assessments (M3) --------------------------------------------
     def add_assessment(self, a: AssessmentRecord, user: User) -> int:
         """Append a new assessment version. 'yes' needs evidence unless saved as a draft (then E1)."""
-        self._writable(user)
+        self.authorize(user, "assessment")
         _iso(a.on_date)
         unknown = set(a.answers) - set(engine.CRITERIA)
         if unknown:
@@ -455,7 +494,7 @@ class Repository:
                 "category": c.category, "document": c.document, "comment": c.comment}
 
     def add_cost(self, c: CostRecord, user: User) -> int:
-        self._writable(user)
+        self.authorize(user, "cost")
         vals = self._cost_values(c)
         with self._tx():
             c.id = self.conn.execute(
@@ -465,13 +504,14 @@ class Repository:
         return c.id
 
     def add_costs(self, costs: list[CostRecord], user: User) -> int:
+        self.authorize(user, "cost")
         with self._tx():
             for c in costs:
                 self.add_cost(c, user)
         return len(costs)
 
     def update_cost(self, c: CostRecord, user: User):
-        self._writable(user)
+        self.authorize(user, "cost")
         vals = self._cost_values(c)
         before = self.conn.execute(f"SELECT {', '.join(vals)} FROM costs WHERE id = ?", (c.id,)).fetchone()
         if before is None:
@@ -486,7 +526,7 @@ class Repository:
             self._audit(user, "update", "cost", c.id, diff_b, {k: vals[k] for k in diff_b})
 
     def delete_cost(self, cost_id: int, user: User):
-        self._writable(user)
+        self.authorize(user, "cost")
         r = self.conn.execute("SELECT * FROM costs WHERE id = ?", (cost_id,)).fetchone()
         if r is None:
             raise KeyError(cost_id)
@@ -502,7 +542,7 @@ class Repository:
     # ---- impairment ---------------------------------------------------
     def set_impairment_event(self, pid: int, on: Optional[date], recoverable: Optional[int], user: User):
         """One impairment event per project (v1 engine). on=None removes it."""
-        self._writable(user)
+        self.authorize(user, "impairment")
         old = self.impairment_event(pid)
         before = {"on": _iso(old[0]), "recoverable_amount": old[1]} if old else None
         with self._tx():
@@ -522,7 +562,7 @@ class Repository:
         return (_d(r["on_date"]), r["recoverable_amount"]) if r else None
 
     def add_impairment_test(self, t: ImpairmentTest, user: User) -> int:
-        self._writable(user)
+        self.authorize(user, "impairment")
         with self._tx():
             t.id = self.conn.execute("INSERT INTO impairment_tests (project_id, on_date, note) VALUES (?,?,?)",
                                      (t.project_id, _iso(t.on_date), t.note)).lastrowid
@@ -530,7 +570,7 @@ class Repository:
         return t.id
 
     def delete_impairment_test(self, test_id: int, user: User):
-        self._writable(user)
+        self.authorize(user, "impairment")
         r = self.conn.execute("SELECT * FROM impairment_tests WHERE id = ?", (test_id,)).fetchone()
         if r is None:
             raise KeyError(test_id)

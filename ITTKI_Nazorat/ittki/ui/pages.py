@@ -18,7 +18,7 @@ from ..i18n import uz
 from ..services import Service
 from . import style
 from .dialogs import CATEGORY_ORDER, NewProjectDialog, combo
-from .widgets import (Cell, DateEdit, card, error, fill_table, info, make_table, money_cell, page_title,
+from .widgets import (Cell, can, DateEdit, card, error, fill_table, info, make_table, money_cell, page_title,
                       selected_data)
 
 T = uz.t
@@ -203,6 +203,8 @@ class ProjectsPage(Page):
         self.open_project.emit(pid)
 
     def _new(self):
+        if not can(self, self.repo, self.user, "project"):
+            return
         d = NewProjectDialog(self.repo, self)
         if d.exec():
             pid = self.repo.save_project(d.record(), self.user)
@@ -290,6 +292,8 @@ class ReportsPage(Page):
               "rep.audit_xlsx": "istisnolar", "rep.template": "xarajatlar_shablon"}
 
     def _run(self, fn, ext, key):
+        if not can(self, self.repo, self.user, "report"):
+            return
         path, _ = QFileDialog.getSaveFileName(self, T(key), f"{self._NAMES[key]}.{ext}", f"*.{ext}")
         if not path:
             return
@@ -427,6 +431,8 @@ class SettingsPage(Page):
             e.setText(s.accounts.source[c])
 
     def _save(self):
+        if not can(self, self.repo, self.user, "settings"):
+            return
         try:
             inc = {fw: {c for c in CATEGORY_ORDER if self.cat_checks[(c, fw)].isChecked()} for fw in FRAMEWORKS}
             new = AppSettings(

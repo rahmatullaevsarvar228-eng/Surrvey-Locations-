@@ -56,7 +56,7 @@ DEFAULT_CONTROLS = {
     "e3_days": 30,
     "e4_pct": 10,
     "e6_days": 60,
-    "e9_amount": 0,      # so'm; 0 = report any NAS/IFRS difference
+    "e9_amount": 1_000_000,   # so'm
     "e10_months": 12,
 }
 

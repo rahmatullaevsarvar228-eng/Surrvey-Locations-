@@ -62,6 +62,17 @@ def main(out: Path):
     d.show()
     grab(d, "20_dialog_yangi_baho")
     d.close()
+    # permission refused: a project leader tries to add a cost
+    from PySide6.QtWidgets import QMessageBox
+    from ittki.db.repository import PermissionDenied
+    try:
+        repo.authorize(User("Aliyev B.", "leader"), "cost")
+    except PermissionDenied as e:
+        box = QMessageBox(QMessageBox.Warning, "Xato", str(e))
+        box.addButton("Yopish", QMessageBox.AcceptRole)
+        box.show()
+        grab(box, "21_ruxsat_yoq")
+        box.close()
     w.close()
     repo.close()
     print(f"{len(shots)} screenshots -> {out}")
