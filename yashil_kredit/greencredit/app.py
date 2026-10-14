@@ -162,9 +162,8 @@ class Ilova(tk.Tk):
         self._menyu_tugma("tarix", "Saqlangan hisoblar")
         self._menyu_tugma("sozlamalar", "Sozlamalar")
 
-        tk.Label(self.sidebar, text=f"Internetsiz ishlaydi.\nMa'lumotlar faqat shu\nkompyuterda (SQLite)\n"
-                                    f"saqlanadi.\n\nv{__version__}",
-                 bg=YASHIL, fg="#D7EBDD", font=self.f_kichik, justify="left",
+        tk.Label(self.sidebar, text="Sarvar Rahmatullaev",
+                 bg=YASHIL, fg="#D7EBDD", font=self.f_oddiy, justify="left",
                  anchor="w").pack(side="bottom", fill="x", padx=24, pady=24)
 
     def _menyu_tugma(self, kalit: str, matn: str) -> None:
