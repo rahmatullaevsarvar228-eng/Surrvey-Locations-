@@ -1,5 +1,5 @@
 """Bazaviy FIFO dispetcher — "kim birinchi kelsa, o'sha birinchi ketadi"."""
-from .model import HEADWAY, HORIZON, path, is_terminal, run_time
+from .model import HEADWAY, HORIZON, path, is_terminal, run_time, seg_capacity
 
 
 def simulate_fifo(st, trains, disruption=None, headway=HEADWAY, horizon=HORIZON):
@@ -45,7 +45,8 @@ def simulate_fifo(st, trains, disruption=None, headway=HEADWAY, horizon=HORIZON)
             a, b = s["p"][s["pos"]], s["p"][s["pos"] + 1]
             key = frozenset((a, b))
             rt = run_time(st, a, b, t)
-            if seg_free_at.get(key, -10**9) > minute:
+            busy = [x for x in seg_free_at.get(key, []) if x > minute]
+            if len(busy) >= seg_capacity(st, a, b):
                 continue
             # peregon yopilgan bo'lsa yoki harakat paytida yopilsa — kirmaydi
             if disruption and key == frozenset(disruption["segment"]) and \
@@ -53,7 +54,7 @@ def simulate_fifo(st, trains, disruption=None, headway=HEADWAY, horizon=HORIZON)
                 continue
             if not is_terminal(st, b) and occ[b] >= st[b].tracks:
                 continue
-            seg_free_at[key] = minute + rt + headway
+            seg_free_at[key] = busy + [minute + rt + headway]
             if not is_terminal(st, b):
                 occ[b] += 1
             if not is_terminal(st, a):

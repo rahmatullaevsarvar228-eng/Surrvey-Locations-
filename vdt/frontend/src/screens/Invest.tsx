@@ -5,7 +5,8 @@ import type { ObgonData, ScenarioData } from '../types'
 import Plot from '../components/Plot'
 import NumInput, { fmtMoney } from '../components/NumInput'
 import { Loading, PresetPicker } from '../components/Common'
-import StationView, { assignTracks } from '../components/StationView'
+import InsertView from '../components/InsertView'
+import { insertPassages } from '../components/lanes'
 import LineScheme, { waitedSoFar } from '../components/LineScheme'
 import PlayerBar from '../components/PlayerBar'
 import { usePlayer } from '../components/usePlayer'
@@ -24,7 +25,7 @@ export default function Invest() {
   const [pi, setPi] = useState<number | null>(null)   // yaqindan ko'riladigan punkt
   const [nSel, setNSel] = useState<number | null>(null)
   const [loops, setLoops] = useState<number | null>(DEFAULTS.obgonLoops)
-  const [len, setLen] = useState<number | null>(DEFAULTS.sidingKm)
+  const [len, setLen] = useState<number | null>(DEFAULTS.obgonLoopKm)
   const [perKm, setPerKm] = useState<number | null>(DEFAULTS.trackPerKm)
   const [sw, setSw] = useState<number | null>(DEFAULTS.obgonSwitches)
   const [idle, setIdle] = useState<number | null>(DEFAULTS.idlePerHour)
@@ -47,12 +48,14 @@ export default function Invest() {
   // sukut bo'yicha — eng ko'p ishlatiladigan punkt (aylanma yo'lda eng ko'p kutish)
   const busiestLoop = useMemo(() => {
     if (!full) return 0
-    const idx = full.scenario.stations.map((s, i) => (s.kind === 'obgon' ? i : -1)).filter(i => i >= 0)
-    let best = 0, bestN = -1
-    idx.forEach((i, j) => {
-      const n = assignTracks(full.scenario.trains, full.keyin, i, 3, true).filter(x => x.extraWait).length
+    // sukut bo'yicha — eng ko'p uchrashuv / quvib o'tish bo'lgan uchastka
+    const m = insertPassages(full.scenario.stations, full.scenario.trains, full.keyin)
+    let best = 0, bestN = -1, j = 0
+    for (const list of m.values()) {
+      const n = list.filter(p => p.lane !== 0).length
       if (n > bestN) { best = j; bestN = n }
-    })
+      j++
+    }
     return best
   }, [full])
 
@@ -110,12 +113,10 @@ export default function Invest() {
   const trackCost = corridorKm != null && perKm != null ? corridorKm * perKm : null
 
   const stFull = full?.scenario.stations
-  const loopIdx = stFull ? stFull.map((s, i) => (s.kind === 'obgon' ? i : -1)).filter(i => i >= 0) : []
+  const loopIdx = stFull ? stFull.map((s, i) => (s.kind === 'jl' ? i : -1)).filter(i => i >= 0) : []
   const piEff = pi ?? busiestLoop
   const li = loopIdx[Math.min(piEff, loopIdx.length - 1)]
-  const stBefore = stFull?.map(s => (s.kind === 'obgon' ? { ...s, tracks: 1 } : s))
   const dis = full?.scenario.disruption
-  const closedAt = dis && p.t >= dis.start && p.t < dis.end ? [dis.segment] : []
   const mb = full?.metrics_oldin.umumiy_kechikish_daq, ma = full?.metrics_keyin.umumiy_kechikish_daq
   const pct = mb && ma != null ? ((ma - mb) / mb) * 100 : null
 
@@ -123,7 +124,7 @@ export default function Invest() {
     <>
       {picker}
 
-      {full && stFull && stBefore && (
+      {full && stFull && (
         <div className="card">
           <h3>{t('full_title')}</h3>
           <p className="muted">{t('full_what')}</p>
@@ -151,10 +152,10 @@ export default function Invest() {
           </div>
           {li != null && (
             <div className="graphs">
-              <StationView title={t('before_ob')} accent="#c2410c" stations={stBefore} trains={full.scenario.trains}
-                schedule={full.oldin} station={li} t={p.t} tracks={1} closedSegments={closedAt} />
-              <StationView title={t('after_ob')} accent="#1c7c54" stations={stFull} trains={full.scenario.trains}
-                schedule={full.keyin} station={li} t={p.t} plannedAll closedSegments={closedAt} />
+              <InsertView title={t('before_ob')} accent="#c2410c" stations={stFull} trains={full.scenario.trains}
+                schedule={full.oldin} jl={li} t={p.t} single />
+              <InsertView title={t('after_ob')} accent="#1c7c54" stations={stFull} trains={full.scenario.trains}
+                schedule={full.keyin} jl={li} t={p.t} planned />
             </div>
           )}
         </div>
@@ -186,7 +187,7 @@ export default function Invest() {
           <label className="num-input"><span>{t('pick_step')}: <b>{n}</b></span>
             <input type="range" min={1} max={Math.max(1, steps.length)} value={n} onChange={e => setNSel(Number(e.target.value))} /></label>
           <NumInput label={t('cost_loops')} value={loops} onChange={setLoops} step={1} />
-          <NumInput label={t('cost_loop_km')} value={len} onChange={setLen} note={t('cost_len_note')} step={0.1} />
+          <NumInput label={t('cost_loop_km')} value={len} onChange={setLen} note={t('ob_len_note')} step={0.1} />
           <NumInput label={t('cost_km')} value={perKm} onChange={setPerKm} note={t('cost_km_note')} />
           <NumInput label={t('cost_sw4')} value={sw} onChange={setSw} note={t('cost_sw_note')} />
           <NumInput label={t('idle_cost')} value={idle} onChange={setIdle} note={t('idle_note')} />

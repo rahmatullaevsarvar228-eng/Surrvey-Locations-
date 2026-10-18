@@ -80,9 +80,9 @@ def test_passing_loop_keeps_run_time_and_safety():
     ok, base, _ = optimise(st, tr, time_limit=TL, workers=4)
     for k in (0, 5, 10):
         st2, tr2, _, _ = add_passing_loop(st, tr, k)
-        assert st2[k + 1].kind == "obgon" and st2[k + 1].tracks == 3
+        assert st2[k + 1].kind == "jl" and st2[k + 2].kind == "jr"
         for t in tr2:   # punkt peregonni bo'ladi, lekin umumiy yurish vaqti o'zgarmaydi
-            assert run_time(st2, k, k + 1, t) + run_time(st2, k + 1, k + 2, t) == run_time(st, k, k + 1, t)
+            assert sum(run_time(st2, k + j, k + j + 1, t) for j in range(3)) == run_time(st, k, k + 1, t)
         hint = map_schedule(st2, tr2, base, k)
         assert verify(st2, tr2, hint) == []
         ok2, sc, _ = optimise(st2, tr2, time_limit=TL, workers=4, extra_hint=hint)
@@ -95,8 +95,8 @@ def test_loops_on_every_section():
     st, tr, _ = preset("oddiy")
     ok, base, _ = optimise(st, tr, time_limit=TL, workers=4)
     st2, tr2, _, hint = add_passing_loops(st, tr, range(len(st) - 1), sched=base)
-    assert len(st2) == 2 * len(st) - 1
-    assert [s.kind for s in st2[1::2]] == ["obgon"] * (len(st) - 1)
+    assert len(st2) == 3 * len(st) - 2
+    assert [s.kind for s in st2[1::3]] == ["jl"] * (len(st) - 1)
     assert verify(st2, tr2, hint) == []
     ok2, sc, _ = optimise(st2, tr2, time_limit=TL, workers=4, extra_hint=hint)
     assert verify(st2, tr2, sc) == []

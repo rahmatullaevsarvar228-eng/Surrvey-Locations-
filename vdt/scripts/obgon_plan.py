@@ -1,5 +1,6 @@
 """
-Bosqichma-bosqich reja: har bir peregonga obgon punkti (asosiy yo'l + chap va o'ng aylanma yo'l).
+Bosqichma-bosqich reja: har bir peregonga ikki yo'lli qo'shimcha (obgon uchastkasi, ~4 km) — poyezdlar
+unda to'xtamasdan uchrashadi va quvib o'tadi.
 Punktlar bittadan qo'shiladi — bitta punkt reytingi (data/cache/obgon.json) bo'yicha eng
 foydalisidan boshlab; teng bo'lsa uzunroq peregon birinchi. Har bosqich oldingi bosqich rejasidan
 boshlaydi (yangi sxemaga o'tkazilgan va validatordan o'tgan), shuning uchun natija bosqichdan
@@ -12,7 +13,7 @@ sys.path.insert(0, ROOT)
 from engine import (preset, optimise, objective_value, verify, metrics, sched_rows, scenario_dict,
                     add_passing_loop, add_passing_loops, map_schedule)
 
-TL = float(os.environ.get("TL", 20)); SEEDS = (1, 2); W = int(os.environ.get("WORKERS", 4))
+TL = float(os.environ.get("TL", 30)); SEEDS = (1,); W = int(os.environ.get("WORKERS", 4))
 PATH = os.path.join(ROOT, "data/cache/obgon.json")
 
 
@@ -39,7 +40,7 @@ for name in ("osish30", "oddiy", "avariya"):
     for r in order:
         k = r["k"]
         st_p, tr_p, d_p, s_p = cur
-        idx = k + sum(1 for x in ks if x < k)              # peregonning joriy sxemadagi indeksi
+        idx = k + 2 * sum(1 for x in ks if x < k)          # peregonning joriy sxemadagi indeksi (har qo'shimcha +2 nuqta)
         st2, tr2, d2, _ = add_passing_loop(st_p, tr_p, idx, d_p)
         hint = map_schedule(st2, tr2, s_p, idx)
         assert not verify(st2, tr2, hint, d2)

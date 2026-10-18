@@ -1,5 +1,5 @@
 """Mustaqil validator: har qanday jadvalni xavfsizlik qoidalari bo'yicha tekshiradi."""
-from .model import HEADWAY, run_time
+from .model import HEADWAY, run_time, seg_capacity
 
 
 def verify(st, trains, sched, disruption=None, headway=HEADWAY):
@@ -16,9 +16,20 @@ def verify(st, trains, sched, disruption=None, headway=HEADWAY):
             seg.setdefault(frozenset((a, b)), []).append((dep, arr, t.id))
     for key, ivs in seg.items():
         ivs.sort()
-        for (s1, e1, i1), (s2, e2, i2) in zip(ivs, ivs[1:]):
-            if s2 < e1 + headway:
-                errs.append(f"peregon {sorted(key)}: {i1} va {i2} to'qnashuvi")
+        a, b = sorted(key)
+        cap = seg_capacity(st, a, b)
+        if cap == 1:
+            for (s1, e1, i1), (s2, e2, i2) in zip(ivs, ivs[1:]):
+                if s2 < e1 + headway:
+                    errs.append(f"peregon {sorted(key)}: {i1} va {i2} to'qnashuvi")
+        else:   # ikki yo'lli qo'shimcha: bir vaqtda ko'pi bilan cap ta poyezd (+headway)
+            ev = sorted([(s, 1) for s, e, i in ivs] + [(e + headway, -1) for s, e, i in ivs], key=lambda x: (x[0], x[1]))
+            cur = 0
+            for _, dlt in ev:
+                cur += dlt
+                if cur > cap:
+                    errs.append(f"peregon {sorted(key)}: sig'im oshdi")
+                    break
         if disruption and key == frozenset(disruption["segment"]):
             for s, e, i in ivs:
                 if s < disruption["end"] and e > disruption["start"]:

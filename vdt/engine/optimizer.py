@@ -1,7 +1,7 @@
 """AI optimallashtiruvchi: CP-SAT (Google OR-Tools) — butun koridor bo'yicha global reja."""
 from ortools.sat.python import cp_model
 
-from .model import HEADWAY, HORIZON, path, is_terminal, run_time, free_run
+from .model import HEADWAY, HORIZON, path, is_terminal, run_time, free_run, seg_capacity
 from .fifo import simulate_fifo
 from .validator import verify
 
@@ -71,10 +71,17 @@ def _solve_cp(st, trains, disruption, objective, headway, horizon, time_limit, w
         obj.append((t.weight if objective == "ustuvorlik" else 1) * delay)
 
     for key, ivs in seg_iv.items():
+        a, b = sorted(key)
+        cap = seg_capacity(st, a, b)
+        dem = [1] * len(ivs)
         if disruption and key == frozenset(disruption["segment"]):
             ivs = ivs + [m.NewFixedSizeIntervalVar(disruption["start"],
                                                    disruption["end"] - disruption["start"], "yopiq")]
-        m.AddNoOverlap(ivs)
+            dem = dem + [cap]
+        if cap == 1:
+            m.AddNoOverlap(ivs)
+        else:   # ikki yo'lli qo'shimcha: poyezdlar to'xtamasdan uchrashadi / quvib o'tadi
+            m.AddCumulative(ivs, dem, cap)
     for i in range(1, n - 1):
         if sta_iv[i]:
             m.AddCumulative(sta_iv[i], [1] * len(sta_iv[i]), st[i].tracks)

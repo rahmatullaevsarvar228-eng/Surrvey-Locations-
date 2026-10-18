@@ -1,7 +1,7 @@
 export type Kind = 'yuk' | 'yolovchi' | 'tezyurar'
 export type Objective = 'umumiy' | 'ustuvorlik'
 
-export interface Station { name: string; km: number; tracks: number; kind?: 'bekat' | 'obgon' }
+export interface Station { name: string; km: number; tracks: number; kind?: 'bekat' | 'obgon' | 'jl' | 'jr' }
 export interface Train {
   id: string; kind: Kind; direction: number; speed: number
   release: number; weight: number; stops: Record<string, number>

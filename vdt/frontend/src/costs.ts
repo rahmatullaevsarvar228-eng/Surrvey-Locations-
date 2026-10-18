@@ -5,6 +5,7 @@ export const DEFAULTS = {
   trackPerKm: 1_000_000,      // O'zbekiston: 0,8 (Buxoro–Miskin) … 1,5 mln $/km (Samarqand–Buxoro modernizatsiyasi)
   switchesSignals: 1_500_000, // strelkalar, MPC/ESC, yer ishlari — manba yo'q, taxmin
   obgonLoops: 2,              // chap va o'ng aylanma yo'l
+  obgonLoopKm: 4.5,           // 4 km obgon uchastkasi + strelka zonalari
   obgonSwitches: 3_000_000,   // 4 ta strelka + signalizatsiya — manba yo'q, taxmin (2 strelka = 1,5 mln $ dan)
   idlePerHour: 300,           // poyezd-soat, $ (Lovett va boshq. 2015: 200–1000+ $)
   daysPerYear: 365,

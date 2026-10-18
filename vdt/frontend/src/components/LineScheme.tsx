@@ -1,6 +1,7 @@
 import { KIND_COLOR } from '../data'
 import { useT } from '../i18n'
 import type { Disruption, Schedule, Station, Train } from '../types'
+import { insertPassages } from './lanes'
 
 const W = 1000, PADX = 50
 
@@ -50,6 +51,7 @@ export default function LineScheme({ stations, trains, lanes, t, disruption, sho
   selected?: number; onPickStation?: (i: number) => void; hideObgon?: boolean
 }) {
   const tr = useT()
+  let passMap = new Map<number, { id: string; enter: number; exit: number; lane: number }[]>()
   const maxKm = stations[stations.length - 1].km
   const X = (km: number) => PADX + (km / maxKm) * (W - 2 * PADX)
   const laneH = 104
@@ -76,7 +78,19 @@ export default function LineScheme({ stations, trains, lanes, t, disruption, sho
             {stations.map((s, i) => {
               const term = i === 0 || i === stations.length - 1
               const x = X(s.km)
-              if (s.kind === 'obgon' && hideObgon) return null
+              if ((s.kind === 'obgon' || s.kind === 'jl' || s.kind === 'jr') && hideObgon) return null
+              if (s.kind === 'jr') return null
+              if (s.kind === 'jl') {
+                const xb = X(stations[i + 1].km), d = Math.min(8, (xb - x) / 3)
+                const loop = (dy: number) => `M${x} ${y0} C ${x + d} ${y0} ${x + d * 0.5} ${y0 + dy} ${x + d * 1.5} ${y0 + dy} L ${xb - d * 1.5} ${y0 + dy} C ${xb - d * 0.5} ${y0 + dy} ${xb - d} ${y0} ${xb} ${y0}`
+                return (
+                  <g key={s.name}>
+                    <path d={loop(-8)} fill="none" stroke="#f08c00" strokeWidth={2.5} />
+                    <path d={loop(8)} fill="none" stroke="#f08c00" strokeWidth={2.5} />
+                    <text x={(x + xb) / 2} y={y0 + 42} textAnchor="middle" className="st-label obg">{s.name}</text>
+                  </g>
+                )
+              }
               if (s.kind === 'obgon') {
                 const d = 30
                 return (
@@ -102,10 +116,16 @@ export default function LineScheme({ stations, trains, lanes, t, disruption, sho
                 </g>
               )
             })}
+            {(() => { passMap = insertPassages(stations, trains, lane.schedule); return null })()}
             {trains.map(trn => {
               const p = trainPos(lane.schedule[trn.id] ?? [], stations, t)
               if (!p) return null
-              const dy = trn.direction === 1 ? -13 : 13
+              let laneOff = 0
+              for (const list of passMap.values()) {
+                const q = list.find(x => x.id === trn.id && t >= x.enter && t <= x.exit)
+                if (q) laneOff = q.lane * 9
+              }
+              const dy = (trn.direction === 1 ? -13 : 13) + laneOff
               const x = X(p.x)
               return (
                 <g key={trn.id} transform={`translate(${x},${y0 + (p.atStation ? dy : dy * 0.55)})`}>

@@ -11,7 +11,7 @@ class Station:
     name: str
     km: float
     tracks: int                  # asosiy yo'l bilan birga yo'llar soni
-    kind: str = "bekat"          # "bekat" | "obgon" — peregon o'rtasidagi quvib o'tish punkti
+    kind: str = "bekat"          # "bekat" | "jl" / "jr" — obgon uchastkasining boshi / oxiri
 
 
 @dataclass
@@ -29,19 +29,48 @@ def _rt(km, tr):
     return max(1, math.ceil(km / tr.speed * 60))
 
 
+def is_real(st, i):
+    """Haqiqiy bekat (ikki yo'lli qo'shimchaning boshi/oxiri emas)."""
+    return st[i].kind == "bekat"
+
+
+def seg_capacity(st, i, j):
+    """Peregon bo'lagining sig'imi: obgon uchastkasida (asosiy yo'l + chap va o'ng aylanma yo'l)
+    bir vaqtda 3 ta poyezd, har biri o'z yo'lida; qolgan bo'laklarda — 1."""
+    return 3 if {st[i].kind, st[j].kind} == {"jl", "jr"} else 1
+
+
+def _cum(st, P, Q, x, full):
+    """P..Q asl peregon ichidagi x nuqtagacha yurish vaqti (yig'indi asl vaqtga teng bo'ladi)."""
+    if x == P:
+        return 0
+    if x == Q:
+        return full
+    prev = 0
+    pts = list(range(P + 1, Q))
+    for n, y in enumerate(pts):
+        f = (st[y].km - st[P].km) / (st[Q].km - st[P].km)
+        v = max(prev + 1, min(round(full * f), full - (len(pts) - n)))
+        if y == x:
+            return v
+        prev = v
+    raise ValueError(x)
+
+
 def run_time(st, i, j, tr):
-    """Peregondagi yurish vaqti. Obgon punkti peregonni ikkiga bo'ladi, lekin umumiy yurish
-    vaqti o'zgarmaydi (yaxlitlash qo'shimcha daqiqa bermasligi uchun)."""
+    """Yurish vaqti. Peregon ichidagi qo'shimcha nuqtalar (ikki yo'lli qo'shimcha) uni bo'laklarga
+    bo'ladi, lekin bekatdan bekatgacha umumiy yurish vaqti o'zgarmaydi."""
     a, b = min(i, j), max(i, j)
-    if st[b].kind == "obgon" and b + 1 < len(st):          # a — bekat, b — obgon
-        full = _rt(st[b + 1].km - st[a].km, tr)
-        f = (st[b].km - st[a].km) / (st[b + 1].km - st[a].km)
-        return max(1, min(full - 1, round(full * f)))
-    if st[a].kind == "obgon" and a - 1 >= 0:               # a — obgon, b — bekat
-        full = _rt(st[b].km - st[a - 1].km, tr)
-        f = (st[a].km - st[a - 1].km) / (st[b].km - st[a - 1].km)
-        return full - max(1, min(full - 1, round(full * f)))
-    return _rt(abs(st[j].km - st[i].km), tr)
+    if is_real(st, a) and is_real(st, b):
+        return _rt(abs(st[b].km - st[a].km), tr)
+    P = a
+    while not is_real(st, P):
+        P -= 1
+    Q = b
+    while not is_real(st, Q):
+        Q += 1
+    full = _rt(st[Q].km - st[P].km, tr)
+    return _cum(st, P, Q, b, full) - _cum(st, P, Q, a, full)
 
 
 def path(st, tr):
