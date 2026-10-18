@@ -57,11 +57,13 @@ cd frontend && npm run dev                         # ishlab chiqish rejimi (API:
 ## Narxlar (taxminiy)
 
 Ekranlardagi standart narxlar ochiq manbalardan olingan va «taxminiy» deb belgilangan (`frontend/src/costs.ts`):
-1 km yo‘l ≈ 1 mln $ (O‘zbekistonda 0,8–11,4 mln $/km); obgon punkti = 2 ta aylanma yo‘l × 1,5 km + 4 ta strelka va
-signalizatsiya (3 mln $ — manba topilmagan, taxmin) ≈ 6 mln $; poyezd-soat turib qolishi 300 $ (adabiyotda 200–1000+ $).
+1 km yo‘l ≈ 1 mln $ (O‘zbekistonda 0,8–11,4 mln $/km); obgon uchastkasi = 2 ta aylanma yo‘l × 4,5 km + 4 ta strelka va
+signalizatsiya (3 mln $ — manba topilmagan, taxmin) ≈ 12 mln $; poyezd-soat turib qolishi 300 $ (adabiyotda 200–1000+ $).
 
-## Obgon punkti modeli
+## Obgon uchastkasi modeli
 
-Obgon punkti peregon o‘rtasiga qo‘shiladigan 3 yo‘lli punkt (`Station.kind = "obgon"`): asosiy yo‘l + chap va o‘ng
-aylanma yo‘l. Peregonni ikki blokka bo‘ladi, umumiy yurish vaqti o‘zgarmaydi. Poyezd unda faqat kerak bo‘lsa to‘xtaydi:
-tez poyezd sekinini quvib o‘tadi yoki qarama-qarshi poyezdlar uchrashadi.
+Har bir peregon o‘rtasiga ~4 km obgon uchastkasi qo‘shiladi (`Station.kind = "jl"/"jr"` — boshi va oxiri):
+asosiy yo‘l + chap va o‘ng aylanma yo‘l. Peregon uch bo‘lakka bo‘linadi: bir yo‘lli — obgon uchastkasi (bir vaqtda
+3 tagacha poyezd, har biri o‘z yo‘lida) — bir yo‘lli. Bekatdan bekatgacha yurish vaqti o‘zgarmaydi. Poyezdlar
+uchastkada **to‘xtamasdan** uchrashadi va quvib o‘tadi. `scripts/obgon_cases.py` — bitta uchastka reytingi,
+`scripts/obgon_plan.py` — bosqichma-bosqich to‘liq reja (barcha peregonlarda).
