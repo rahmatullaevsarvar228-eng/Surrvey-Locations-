@@ -110,9 +110,9 @@ def scenario(name: str):
     return _cache(f"{name}.json")
 
 
-@app.get("/api/razyezd")
-def razyezd():
-    return _cache("razyezd.json")
+@app.get("/api/obgon")
+def obgon():
+    return _cache("obgon.json")
 
 
 @app.post("/api/simulate_fifo")

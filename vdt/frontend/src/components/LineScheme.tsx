@@ -76,6 +76,18 @@ export default function LineScheme({ stations, trains, lanes, t, disruption, sho
             {stations.map((s, i) => {
               const term = i === 0 || i === stations.length - 1
               const x = X(s.km)
+              if (s.kind === 'obgon') {
+                const d = 30
+                return (
+                  <g key={s.name}>
+                    <path d={`M${x - d} ${y0} C ${x - d + 10} ${y0} ${x - 14} ${y0 - 9} ${x - 6} ${y0 - 9} L ${x + 6} ${y0 - 9} C ${x + 14} ${y0 - 9} ${x + d - 10} ${y0} ${x + d} ${y0}`}
+                      fill="none" stroke="#f08c00" strokeWidth={2.5} />
+                    <path d={`M${x - d} ${y0} C ${x - d + 10} ${y0} ${x - 14} ${y0 + 9} ${x - 6} ${y0 + 9} L ${x + 6} ${y0 + 9} C ${x + 14} ${y0 + 9} ${x + d - 10} ${y0} ${x + d} ${y0}`}
+                      fill="none" stroke="#f08c00" strokeWidth={2.5} />
+                    <text x={x} y={y0 + 42} textAnchor="middle" className="st-label obg">{s.name}</text>
+                  </g>
+                )
+              }
               return (
                 <g key={s.name}>
                   {showTracks && !term && Array.from({ length: s.tracks - 1 }).map((_, j) => (

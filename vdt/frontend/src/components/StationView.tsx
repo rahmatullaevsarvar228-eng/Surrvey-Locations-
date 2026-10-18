@@ -11,6 +11,10 @@ const SWL = 120, SWR = 520            // strelkalar
 const LOOP_L = 175, LOOP_R = 465      // qo'shimcha yo'lning to'g'ri qismi
 const TW = 74                         // poyezd uzunligi (px)
 
+function loopPath(y: number) {
+  return `M${SWL} ${YM} C ${SWL + 45} ${YM} ${LOOP_L - 15} ${y} ${LOOP_L + 20} ${y} L ${LOOP_R - 20} ${y} C ${LOOP_R + 15} ${y} ${SWR - 45} ${YM} ${SWR} ${YM}`
+}
+
 function trackY(k: number) {
   if (k === 0) return YM
   const side = k % 2 === 1 ? -1 : 1
@@ -20,7 +24,8 @@ function trackY(k: number) {
 interface Stay { id: string; arr: number; dep: number; track: number; extraWait: boolean }
 
 // Har bir bekatda turgan poyezdlarga yo'l biriktirish (bir xil vaqtda bitta yo'lda bitta poyezd).
-export function assignTracks(trains: Train[], sched: Schedule, station: number, tracks: number): Stay[] {
+export function assignTracks(trains: Train[], sched: Schedule, station: number, tracks: number, obgon = false): Stay[] {
+  const dirOf = new Map(trains.map(t => [t.id, t.direction]))
   const stays: Omit<Stay, 'track'>[] = []
   for (const t of trains) {
     for (const r of sched[t.id] ?? []) {
@@ -34,9 +39,11 @@ export function assignTracks(trains: Train[], sched: Schedule, station: number, 
   const freeAt = Array.from({ length: Math.max(tracks, 1) }, () => -Infinity)
   return stays.map(s => {
     // to'xtamasdan o'tadigan poyezd — asosiy yo'l; kutadigan — qo'shimcha yo'l
-    const order = s.extraWait
-      ? [...Array.from({ length: tracks - 1 }, (_, i) => i + 1), 0]
-      : [0, ...Array.from({ length: tracks - 1 }, (_, i) => i + 1)]
+    let loops = Array.from({ length: tracks - 1 }, (_, i) => i + 1)
+    // obgon punktida kutayotgan poyezd o'z yo'nalishiga nisbatan o'ng tomondagi aylanma yo'lga chiqadi
+    // (o'ngga harakatda — pastki, chapga harakatda — yuqori), band bo'lsa — chap tomondagisiga
+    if (obgon && tracks >= 3) loops = dirOf.get(s.id) === 1 ? [2, 1] : [1, 2]
+    const order = s.extraWait ? [...loops, 0] : [0, ...loops]
     let k = order.find(i => freeAt[i] <= s.arr)
     if (k === undefined) k = order.reduce((b, i) => (freeAt[i] < freeAt[b] ? i : b), order[0])
     freeAt[k] = s.dep + 1
@@ -54,6 +61,7 @@ interface Props {
   t: number
   tracks?: number           // bekatdagi yo'llar soni (qurilgan razyezd bilan)
   plannedTrack?: boolean    // oxirgi yo'l — loyihadagi yangi razyezd (punktir)
+  plannedAll?: boolean      // barcha aylanma yo'llar — loyihadagi yangi obgon punkti (punktir)
   closedSegments?: [number, number][]
 }
 
@@ -61,9 +69,10 @@ export default function StationView(p: Props) {
   const tr = useT()
   const st = p.stations[p.station]
   const term = p.station === 0 || p.station === p.stations.length - 1
+  const isObgon = st.kind === 'obgon'
   const tracks = Math.min(p.tracks ?? st.tracks, 5)
-  const stays = useMemo(() => assignTracks(p.trains, p.schedule, p.station, term ? 3 : tracks),
-    [p.trains, p.schedule, p.station, tracks, term])
+  const stays = useMemo(() => assignTracks(p.trains, p.schedule, p.station, term ? 3 : tracks, isObgon),
+    [p.trains, p.schedule, p.station, tracks, term, isObgon])
   const byId = useMemo(() => new Map(p.trains.map(x => [x.id, x])), [p.trains])
 
   // bekatda turgan poyezdlar
@@ -92,7 +101,7 @@ export default function StationView(p: Props) {
     <div className="stview">
       <div className="stview-head">
         <b style={{ color: p.accent }}>{p.title}</b>
-        <span className="muted small">{st.name} · {st.km} km · {term ? tr('terminal') : `${tracks} ${tr('tracks')}`}</span>
+        <span className="muted small">{isObgon ? (tracks >= 3 ? tr('obgon_point') : tr('before_ob')) : st.name} · {st.km} km{isObgon && tracks < 3 ? '' : ` · ${term ? tr('terminal') : `${tracks} ${tr('tracks')}`}`}</span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="stview-svg" role="img" aria-label={`${st.name}`}>
         <defs>
@@ -109,15 +118,20 @@ export default function StationView(p: Props) {
         {/* yo'llar */}
         {Array.from({ length: term ? 1 : tracks }).map((_, k) => {
           const y = trackY(k)
-          const planned = p.plannedTrack && k === tracks - 1 && k > 0
+          const planned = k > 0 && ((p.plannedTrack && k === tracks - 1) || p.plannedAll)
           const busy = here.some(s => s.track === k)
-          const color = planned ? '#f59f00' : busy ? '#3ddc84' : '#c9d1cc'
+          const color = busy ? '#3ddc84' : planned ? '#f59f00' : '#c9d1cc'
           if (k === 0) return <line key={k} x1="0" x2={W} y1={y} y2={y} stroke={busy ? color : '#c9d1cc'} strokeWidth="5" strokeLinecap="round" />
           return (
-            <path key={k} d={`M${SWL} ${YM} L${LOOP_L} ${y} L${LOOP_R} ${y} L${SWR} ${YM}`} fill="none"
+            <path key={k} d={loopPath(y)} fill="none"
               stroke={color} strokeWidth="5" strokeLinejoin="round" strokeDasharray={planned ? '10 7' : undefined} opacity={busy || planned ? 1 : 0.85} />
           )
         })}
+        {!isObgon && !term && <rect x={(LOOP_L + LOOP_R) / 2 - 90} y={YM + 12} width="180" height="7" rx="2" fill="#56635b" />}
+        {isObgon && tracks >= 3 && <>
+          <text x={W / 2} y={trackY(1) - 12} textAnchor="middle" className="sv-dim">{tr('loop_left')}</text>
+          <text x={W / 2} y={trackY(2) + 22} textAnchor="middle" className="sv-dim">{tr('loop_right')}</text>
+        </>}
         {closed && <text x={W / 2} y={H - 12} textAnchor="middle" className="sv-closed">{tr('closed')}</text>}
 
         {/* strelkalar */}
@@ -148,13 +162,13 @@ export default function StationView(p: Props) {
           return <TrainRect key={m.id + (m.leaving ? 'L' : 'A')} id={m.id} x={m.x} y={YM} color={KIND_COLOR[t.kind]} dir={m.dir} label="" />
         })}
 
-        <text x={W / 2} y="26" textAnchor="middle" className="sv-title">{st.name}</text>
+        <text x={W / 2} y="26" textAnchor="middle" className="sv-title">{isObgon ? (tracks >= 3 ? `${tr('obgon_point')} ${st.name}` : `${st.name}: ${tr('before_ob')}`) : st.name}</text>
         <text x={W - 14} y="26" textAnchor="end" className="sv-clock">{hhmm(p.t)}</text>
       </svg>
       <div className="stview-legend small muted">
         <span><i className="sig g" /> {tr('sig_go')}</span>
         <span><i className="sig r" /> {tr('sig_stop')}</span>
-        {p.plannedTrack && <span><i className="trk-new" /> {tr('new_track')}</span>}
+        {(p.plannedTrack || p.plannedAll) && <span><i className="trk-new" /> {tr(p.plannedAll ? 'new_obgon' : 'new_track')}</span>}
       </div>
     </div>
   )

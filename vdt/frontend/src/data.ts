@@ -1,4 +1,4 @@
-import type { ScenarioData, SidingData } from './types'
+import type { ObgonData, ScenarioData } from './types'
 
 export type PresetName = 'oddiy' | 'avariya' | 'osish30'
 export const PRESETS: PresetName[] = ['oddiy', 'avariya', 'osish30']
@@ -24,8 +24,8 @@ export function loadScenario(name: PresetName): Promise<ScenarioData> {
   return cache.get(name)!
 }
 
-export function loadSiding(): Promise<SidingData> {
-  return getJson<SidingData>('api/razyezd', 'cache/razyezd.json')
+export function loadObgon(): Promise<ObgonData> {
+  return getJson<ObgonData>('api/obgon', 'cache/obgon.json')
 }
 
 export async function solve(body: unknown): Promise<ScenarioData> {

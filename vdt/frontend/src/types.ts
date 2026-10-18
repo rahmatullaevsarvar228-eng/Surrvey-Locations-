@@ -1,7 +1,7 @@
 export type Kind = 'yuk' | 'yolovchi' | 'tezyurar'
 export type Objective = 'umumiy' | 'ustuvorlik'
 
-export interface Station { name: string; km: number; tracks: number }
+export interface Station { name: string; km: number; tracks: number; kind?: 'bekat' | 'obgon' }
 export interface Train {
   id: string; kind: Kind; direction: number; speed: number
   release: number; weight: number; stops: Record<string, number>
@@ -35,14 +35,11 @@ export interface ScenarioData {
   tiklanish?: { fifo: number | null; ai: Partial<Record<Objective, number | null>> }
   tez_hisob?: { soniya: number; status: string; umumiy_kechikish: number; xatolar: number }
 }
-export interface SidingVariant {
-  bekat: string; indeks: number; yollar_oldin: number; yollar_keyin: number
-  qiymat: number; tejaldi_daq: number; schedule: Schedule; metrics: Metrics; xatolar: string[]
+export interface ObgonRank { peregon: string; k: number; uzunlik_km: number; tejaldi_daq: number; sezilarli: boolean; xatolar: number }
+export interface ObgonVariant {
+  peregon: string; k: number; punkt: string; tejaldi_daq: number
+  scenario: { stations: Station[]; trains: Train[]; disruption: Disruption | null }
+  oldin: Schedule; keyin: Schedule; metrics_oldin: Metrics; metrics_keyin: Metrics; xatolar: string[]
 }
-export interface SidingRank { bekat: string; indeks: number; yollar: number; tejaldi_daq: number; sezilarli: boolean; xatolar: number }
-export interface SidingScenario {
-  boshlangich: number; shovqin: number
-  nazorat: { qiymat: number; schedule: Schedule; metrics: Metrics; xatolar: string[] }
-  reyting: SidingRank[]; variantlar: SidingVariant[]
-}
-export interface SidingData { hisob_s: number; seedlar: number[]; ssenariylar: Partial<Record<'oddiy' | 'avariya', SidingScenario>> }
+export interface ObgonScenario { boshlangich: number; nazorat: number; shovqin: number; reyting: ObgonRank[]; variantlar: ObgonVariant[] }
+export interface ObgonData { hisob_s: number; seedlar: number[]; ssenariylar: Partial<Record<'oddiy' | 'avariya' | 'osish30', ObgonScenario>> }

@@ -4,7 +4,8 @@ from .fifo import simulate_fifo
 from .optimizer import optimise, objective_value
 from .validator import verify
 from .metrics import metrics, recovery_time, breakdown_event, free_run_times
-from .scenarios import make_scenario, preset, PRESETS, DEMO_SEED, AVARIYA_DISRUPTION, apply_breakdown
+from .scenarios import (make_scenario, preset, PRESETS, DEMO_SEED, AVARIYA_DISRUPTION, apply_breakdown,
+                        add_passing_loop, map_schedule)
 from .investment import investment_ranking
 from .export import to_json, sched_rows, scenario_dict
 from .run import run_case

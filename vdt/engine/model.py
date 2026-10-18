@@ -11,6 +11,7 @@ class Station:
     name: str
     km: float
     tracks: int                  # asosiy yo'l bilan birga yo'llar soni
+    kind: str = "bekat"          # "bekat" | "obgon" — peregon o'rtasidagi quvib o'tish punkti
 
 
 @dataclass
@@ -24,8 +25,23 @@ class Train:
     stops: dict = field(default_factory=dict)   # bekat indeksi -> minimal turish, daqiqa
 
 
+def _rt(km, tr):
+    return max(1, math.ceil(km / tr.speed * 60))
+
+
 def run_time(st, i, j, tr):
-    return max(1, math.ceil(abs(st[j].km - st[i].km) / tr.speed * 60))
+    """Peregondagi yurish vaqti. Obgon punkti peregonni ikkiga bo'ladi, lekin umumiy yurish
+    vaqti o'zgarmaydi (yaxlitlash qo'shimcha daqiqa bermasligi uchun)."""
+    a, b = min(i, j), max(i, j)
+    if st[b].kind == "obgon" and b + 1 < len(st):          # a — bekat, b — obgon
+        full = _rt(st[b + 1].km - st[a].km, tr)
+        f = (st[b].km - st[a].km) / (st[b + 1].km - st[a].km)
+        return max(1, min(full - 1, round(full * f)))
+    if st[a].kind == "obgon" and a - 1 >= 0:               # a — obgon, b — bekat
+        full = _rt(st[b].km - st[a - 1].km, tr)
+        f = (st[a].km - st[a - 1].km) / (st[b].km - st[a - 1].km)
+        return full - max(1, min(full - 1, round(full * f)))
+    return _rt(abs(st[j].km - st[i].km), tr)
 
 
 def path(st, tr):

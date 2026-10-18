@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from engine import preset, verify, Station
+from engine import preset, verify
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,13 +31,15 @@ def test_cached_scenarios_valid(name):
         assert not d["fifo"]["ok"] and d["fifo"]["deadlock"]["stuck_trains"]
 
 
-def test_cached_siding_variants_valid():
-    d = load("razyezd.json")
+def test_cached_obgon_variants_valid():
+    from engine import add_passing_loop
+    d = load("obgon.json")
     for name, s in d["ssenariylar"].items():
         st, tr, dis = preset(name)
-        assert verify(st, tr, tup(s["nazorat"]["schedule"]), dis) == []
+        for r in s["reyting"]:
+            assert r["tejaldi_daq"] >= 0 and r["xatolar"] == 0
         for v in s["variantlar"]:
-            assert v["tejaldi_daq"] >= 0
-            st2 = [Station(x.name, x.km, x.tracks + (1 if j == v["indeks"] else 0)) for j, x in enumerate(st)]
-            assert verify(st2, tr, tup(v["schedule"]), dis) == []
-            assert v["metrics"]["umumiy_kechikish_daq"] == s["nazorat"]["metrics"]["umumiy_kechikish_daq"] - v["tejaldi_daq"]
+            st2, tr2, d2, _ = add_passing_loop(st, tr, v["k"], dis)
+            assert verify(st2, tr2, tup(v["oldin"]), d2) == []
+            assert verify(st2, tr2, tup(v["keyin"]), d2) == []
+            assert v["metrics_keyin"]["umumiy_kechikish_daq"] == v["metrics_oldin"]["umumiy_kechikish_daq"] - v["tejaldi_daq"]

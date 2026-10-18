@@ -36,5 +36,5 @@ def test_bad_input():
 
 def test_cache_endpoints():
     assert c.get("/api/scenarios/oddiy").status_code == 200
-    r = c.get("/api/razyezd")
+    r = c.get("/api/obgon")
     assert r.status_code == 200 and "ssenariylar" in r.json()

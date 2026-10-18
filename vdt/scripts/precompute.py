@@ -2,7 +2,7 @@
 Kesh generatori: tayyor ssenariylarni (oddiy / avariya / osish30) oldindan hisoblab,
 data/cache/*.json ga saqlaydi. Sahnada faqat shu kesh ko'rsatiladi.
 
-  python scripts/precompute.py                 # ssenariylar (120 s) + razyezd reytingi
+  python scripts/precompute.py                 # ssenariylar (120 s) + obgon punkti reytingi
   python scripts/precompute.py --skip-investment
   python scripts/precompute.py --only-investment
 """
@@ -83,11 +83,11 @@ def refresh_recovery():
 
 
 def investment():
-    """'Yangi razyezd qayerda?' reytingi — scripts/siding_cases.py (yangilangan protokol)."""
+    """'Obgon punkti qayerga?' reytingi — scripts/obgon_cases.py."""
     import runpy
-    log("razyezd reytingi boshlandi (~20 daq) ...")
-    runpy.run_path(os.path.join(ROOT, "scripts", "siding_cases.py"), run_name="__main__")
-    log("saqlandi: razyezd.json")
+    log("obgon punkti reytingi boshlandi (~25 daq) ...")
+    runpy.run_path(os.path.join(ROOT, "scripts", "obgon_cases.py"), run_name="__main__")
+    log("saqlandi: obgon.json")
 
 
 if __name__ == "__main__":

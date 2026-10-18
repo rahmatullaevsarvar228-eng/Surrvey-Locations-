@@ -72,3 +72,19 @@ def test_recovery_time():
     st, tr, _ = preset("oddiy")
     ok, sf, _ = simulate_fifo(st, tr)
     assert recovery_time(st, tr, sf, dict(segment=(0, 1), start=5000, end=5001)) == 0
+
+
+def test_passing_loop_keeps_run_time_and_safety():
+    from engine import add_passing_loop, map_schedule, run_time
+    st, tr, _ = preset("oddiy")
+    ok, base, _ = optimise(st, tr, time_limit=TL, workers=4)
+    for k in (0, 5, 10):
+        st2, tr2, _, _ = add_passing_loop(st, tr, k)
+        assert st2[k + 1].kind == "obgon" and st2[k + 1].tracks == 3
+        for t in tr2:   # punkt peregonni bo'ladi, lekin umumiy yurish vaqti o'zgarmaydi
+            assert run_time(st2, k, k + 1, t) + run_time(st2, k + 1, k + 2, t) == run_time(st, k, k + 1, t)
+        hint = map_schedule(st2, tr2, base, k)
+        assert verify(st2, tr2, hint) == []
+        ok2, sc, _ = optimise(st2, tr2, time_limit=TL, workers=4, extra_hint=hint)
+        assert verify(st2, tr2, sc) == []
+        assert objective_value(st2, tr2, sc, "umumiy") <= objective_value(st, tr, base, "umumiy")
