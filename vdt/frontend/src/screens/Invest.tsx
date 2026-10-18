@@ -5,7 +5,7 @@ import type { ObgonData, ScenarioData } from '../types'
 import Plot from '../components/Plot'
 import NumInput, { fmtMoney } from '../components/NumInput'
 import { Loading, PresetPicker } from '../components/Common'
-import StationView from '../components/StationView'
+import StationView, { assignTracks } from '../components/StationView'
 import LineScheme, { waitedSoFar } from '../components/LineScheme'
 import PlayerBar from '../components/PlayerBar'
 import { usePlayer } from '../components/usePlayer'
@@ -21,7 +21,7 @@ export default function Invest() {
   const [err, setErr] = useState<string | null>(null)
   const [ob, setOb] = useState<ObgonData | null>(null)
   const [odd, setOdd] = useState<ScenarioData | null>(null)
-  const [pi, setPi] = useState(0)             // yaqindan ko'riladigan punkt
+  const [pi, setPi] = useState<number | null>(null)   // yaqindan ko'riladigan punkt
   const [nSel, setNSel] = useState<number | null>(null)
   const [loops, setLoops] = useState<number | null>(DEFAULTS.obgonLoops)
   const [len, setLen] = useState<number | null>(DEFAULTS.sidingKm)
@@ -30,7 +30,7 @@ export default function Invest() {
   const [idle, setIdle] = useState<number | null>(DEFAULTS.idlePerHour)
   const [inc, setInc] = useState<number | null>(null)
   useEffect(() => { loadObgon().then(setOb).catch(e => setErr(String(e))); loadScenario('oddiy').then(setOdd) }, [])
-  useEffect(() => { setPi(0); setNSel(null) }, [sc])
+  useEffect(() => { setPi(null); setNSel(null) }, [sc])
   const d = ob?.ssenariylar[sc as ObName] ?? null
   const full = d?.toliq
   const steps = useMemo(() => d?.bosqichlar ?? [], [d])
@@ -44,6 +44,17 @@ export default function Invest() {
     return [Math.max(0, Math.floor(lo / 10) * 10), Math.ceil(hi / 10) * 10 + 10]
   }, [full])
   const p = usePlayer(range)
+  // sukut bo'yicha — eng ko'p ishlatiladigan punkt (aylanma yo'lda eng ko'p kutish)
+  const busiestLoop = useMemo(() => {
+    if (!full) return 0
+    const idx = full.scenario.stations.map((s, i) => (s.kind === 'obgon' ? i : -1)).filter(i => i >= 0)
+    let best = 0, bestN = -1
+    idx.forEach((i, j) => {
+      const n = assignTracks(full.scenario.trains, full.keyin, i, 3, true).filter(x => x.extraWait).length
+      if (n > bestN) { best = j; bestN = n }
+    })
+    return best
+  }, [full])
 
   const planPlot = useMemo(() => {
     if (!steps.length) return null
@@ -100,7 +111,8 @@ export default function Invest() {
 
   const stFull = full?.scenario.stations
   const loopIdx = stFull ? stFull.map((s, i) => (s.kind === 'obgon' ? i : -1)).filter(i => i >= 0) : []
-  const li = loopIdx[Math.min(pi, loopIdx.length - 1)]
+  const piEff = pi ?? busiestLoop
+  const li = loopIdx[Math.min(piEff, loopIdx.length - 1)]
   const stBefore = stFull?.map(s => (s.kind === 'obgon' ? { ...s, tracks: 1 } : s))
   const dis = full?.scenario.disruption
   const closedAt = dis && p.t >= dis.start && p.t < dis.end ? [dis.segment] : []
@@ -134,7 +146,7 @@ export default function Invest() {
           <div className="stview-bar" style={{ marginTop: 8 }}>
             <b>{t('pick_point')}:</b>
             {loopIdx.map((i, j) => (
-              <button key={i} className={`btn chip ${j === pi ? 'on' : ''}`} onClick={() => setPi(j)}>{stFull[i].name}</button>
+              <button key={i} className={`btn chip ${j === piEff ? 'on' : ''}`} onClick={() => setPi(j)}>{stFull[i].name}</button>
             ))}
           </div>
           {li != null && (

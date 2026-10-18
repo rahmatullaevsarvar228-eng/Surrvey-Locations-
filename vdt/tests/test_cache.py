@@ -43,3 +43,25 @@ def test_cached_obgon_variants_valid():
             assert verify(st2, tr2, tup(v["oldin"]), d2) == []
             assert verify(st2, tr2, tup(v["keyin"]), d2) == []
             assert v["metrics_keyin"]["umumiy_kechikish_daq"] == v["metrics_oldin"]["umumiy_kechikish_daq"] - v["tejaldi_daq"]
+
+
+def test_cached_full_plan_valid():
+    from engine import add_passing_loops
+    d = load("obgon.json")
+    for name, s in d["ssenariylar"].items():
+        st, tr, dis = preset(name)
+        k_of = {r["peregon"]: r["k"] for r in s["reyting"]}
+        steps = s["bosqichlar"]
+        ks = [k_of[p] for p in steps[-1]["punktlar"]]
+        st2, tr2, d2, _ = add_passing_loops(st, tr, ks, dis)
+        full = s["toliq"]
+        assert [x.name for x in st2] == [x["name"] for x in full["scenario"]["stations"]]
+        assert verify(st2, tr2, tup(full["oldin"]), d2) == []
+        assert verify(st2, tr2, tup(full["keyin"]), d2) == []
+        # bosqichlar: tejash kamaymaydi, xato yo'q
+        prev = 0
+        for x in steps:
+            assert x["xatolar"] == 0 and x["tejaldi_daq"] >= prev
+            prev = x["tejaldi_daq"]
+        assert full["metrics_keyin"]["umumiy_kechikish_daq"] == s["nazorat"] - steps[-1]["tejaldi_daq"] + \
+            (full["metrics_oldin"]["umumiy_kechikish_daq"] - s["nazorat"])
