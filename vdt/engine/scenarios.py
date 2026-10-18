@@ -60,7 +60,9 @@ def add_passing_loop(st, trains, k, disruption=None, tracks=3):
     poyezd bilan uchrashuv). Qaytaradi: (st2, trains2, disruption2, eski->yangi indeks funksiyasi).
     """
     mid = round((st[k].km + st[k + 1].km) / 2, 1)
-    st2 = st[:k + 1] + [Station(f"O{k}{k + 1}", mid, tracks, "obgon")] + st[k + 1:]
+    # nom — chapdagi bekatdan keyingi punkt: S1 dan keyin — "O1" (sxema qanday bo'lmasin, nom bir xil)
+    left = st[k].name[1:] if st[k].name[:1] == "S" else st[k].name
+    st2 = st[:k + 1] + [Station(f"O{left}", mid, tracks, "obgon")] + st[k + 1:]
     f = lambda i: i + 1 if i > k else i
     tr2 = copy.deepcopy(trains)
     for t in tr2:
@@ -92,3 +94,18 @@ def map_schedule(st2, trains2, sched, k):
                 new.append((k + 1, am, am))
         out[tid] = new
     return out
+
+
+def add_passing_loops(st, trains, ks, disruption=None, sched=None, tracks=3):
+    """
+    Bir nechta peregonga obgon punkti qo'shish (ks — asl peregon indekslari).
+    Yuqoridan pastga qo'shiladi, shuning uchun indekslar siljimaydi. sched berilsa,
+    u yangi sxemaga o'tkaziladi (xavfsiz boshlang'ich reja).
+    Qaytaradi: (st2, trains2, disruption2, sched2)
+    """
+    st2, tr2, d2, s2 = st, trains, disruption, sched
+    for k in sorted(set(ks), reverse=True):
+        st2, tr2, d2, _ = add_passing_loop(st2, tr2, k, d2, tracks)
+        if s2 is not None:
+            s2 = map_schedule(st2, tr2, s2, k)
+    return st2, tr2, d2, s2

@@ -88,3 +88,16 @@ def test_passing_loop_keeps_run_time_and_safety():
         ok2, sc, _ = optimise(st2, tr2, time_limit=TL, workers=4, extra_hint=hint)
         assert verify(st2, tr2, sc) == []
         assert objective_value(st2, tr2, sc, "umumiy") <= objective_value(st, tr, base, "umumiy")
+
+
+def test_loops_on_every_section():
+    from engine import add_passing_loops
+    st, tr, _ = preset("oddiy")
+    ok, base, _ = optimise(st, tr, time_limit=TL, workers=4)
+    st2, tr2, _, hint = add_passing_loops(st, tr, range(len(st) - 1), sched=base)
+    assert len(st2) == 2 * len(st) - 1
+    assert [s.kind for s in st2[1::2]] == ["obgon"] * (len(st) - 1)
+    assert verify(st2, tr2, hint) == []
+    ok2, sc, _ = optimise(st2, tr2, time_limit=TL, workers=4, extra_hint=hint)
+    assert verify(st2, tr2, sc) == []
+    assert objective_value(st2, tr2, sc, "umumiy") <= objective_value(st, tr, base, "umumiy")

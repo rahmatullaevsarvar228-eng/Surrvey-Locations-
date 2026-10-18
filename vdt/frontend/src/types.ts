@@ -41,5 +41,13 @@ export interface ObgonVariant {
   scenario: { stations: Station[]; trains: Train[]; disruption: Disruption | null }
   oldin: Schedule; keyin: Schedule; metrics_oldin: Metrics; metrics_keyin: Metrics; xatolar: string[]
 }
-export interface ObgonScenario { boshlangich: number; nazorat: number; shovqin: number; reyting: ObgonRank[]; variantlar: ObgonVariant[] }
+export interface ObgonStep { n: number; qoshildi: string; punktlar: string[]; qiymat: number; tejaldi_daq: number; xatolar: number }
+export interface ObgonFull {
+  scenario: { stations: Station[]; trains: Train[]; disruption: Disruption | null }
+  oldin: Schedule; keyin: Schedule; metrics_oldin: Metrics; metrics_keyin: Metrics; xatolar: string[]; punktlar: number
+}
+export interface ObgonScenario {
+  boshlangich: number; nazorat: number; shovqin: number; reyting: ObgonRank[]; variantlar: ObgonVariant[]
+  bosqichlar?: ObgonStep[]; toliq?: ObgonFull
+}
 export interface ObgonData { hisob_s: number; seedlar: number[]; ssenariylar: Partial<Record<'oddiy' | 'avariya' | 'osish30', ObgonScenario>> }

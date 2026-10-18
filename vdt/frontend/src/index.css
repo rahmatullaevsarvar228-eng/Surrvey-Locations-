@@ -138,3 +138,4 @@ footer { text-align: center; padding: 16px; font-size: .9em; border-top: 1px sol
 .box-note { background: #eaf6ef; border-left: 3px solid var(--ai); padding: 8px 12px; border-radius: 6px; margin: 10px 0 4px; font-weight: 600; }
 details summary { cursor: pointer; color: var(--accent); margin-top: 6px; }
 .st-label.obg { fill: #c25e00; font-weight: 700; }
+.mtable tr.sel-row td { background: #eaf6ef; font-weight: 700; }

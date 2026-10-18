@@ -44,10 +44,10 @@ export function waitedSoFar(trains: Train[], sched: Schedule, t: number): number
 
 interface Lane { label: string; color: string; schedule: Schedule; counter?: number }
 
-export default function LineScheme({ stations, trains, lanes, t, disruption, showTracks = true, selected, onPickStation }: {
+export default function LineScheme({ stations, trains, lanes, t, disruption, showTracks = true, selected, onPickStation, hideObgon }: {
   stations: Station[]; trains: Train[]; lanes: Lane[]; t: number
   disruption?: Disruption | null; showTracks?: boolean
-  selected?: number; onPickStation?: (i: number) => void
+  selected?: number; onPickStation?: (i: number) => void; hideObgon?: boolean
 }) {
   const tr = useT()
   const maxKm = stations[stations.length - 1].km
@@ -76,6 +76,7 @@ export default function LineScheme({ stations, trains, lanes, t, disruption, sho
             {stations.map((s, i) => {
               const term = i === 0 || i === stations.length - 1
               const x = X(s.km)
+              if (s.kind === 'obgon' && hideObgon) return null
               if (s.kind === 'obgon') {
                 const d = 30
                 return (
